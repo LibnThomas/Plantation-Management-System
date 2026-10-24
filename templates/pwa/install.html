@@ -1,0 +1,73 @@
+{% extends "base.html" %}{% load core_tags %}
+{% block title %}{% t "Install the app" %}{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1><i class="bi bi-phone text-primary"></i> {% t "Install the app" %}</h1>
+  <div class="text-muted small">{% t "Use the Plantation Management System like an app on Android phones and iPhones. No Play Store or App Store needed." %}</div></div></div>
+
+<div class="row g-3">
+  <div class="col-lg-4"><div class="card h-100"><div class="card-body text-center">
+    <h6>{% t "Share this app" %}</h6>
+    <div class="qr mx-auto my-2" style="max-width:220px">{{ qr_app|safe }}</div>
+    <code class="small d-block text-break">{{ app_url }}</code>
+    <div class="d-flex justify-content-center gap-2 mt-3">
+      <button type="button" class="btn btn-sm btn-outline-primary" id="copy-link" data-url="{{ app_url }}"><i class="bi bi-clipboard"></i> {% t "Copy link" %}</button>
+      <button type="button" class="btn btn-sm btn-outline-primary d-none" id="share-link" data-url="{{ app_url }}"><i class="bi bi-share"></i> {% t "Share" %}</button>
+    </div>
+    <div class="small text-muted mt-2">{% t "Scan the code with a phone camera, or send the link on WhatsApp. Phones must reach this server (same Wi-Fi, or the internet address)." %}</div>
+  </div></div></div>
+
+  <div class="col-lg-4"><div class="card h-100"><div class="card-body">
+    <h6><i class="bi bi-android2 text-success"></i> {% t "Android" %}</h6>
+    {% if apk_available %}
+    <p class="small mb-2">{% t "Option 1 – the Android app (APK):" %}</p>
+    <div class="d-flex align-items-center gap-3 mb-2">
+      <div style="width:110px">{{ qr_apk|safe }}</div>
+      <div><a class="btn btn-primary btn-sm" href="{% url 'android_apk' %}"><i class="bi bi-download"></i> {% t "Download APK" %}</a>
+        <div class="small text-muted mt-1">{{ apk_size_mb }} MB</div></div>
+    </div>
+    <ol class="small ps-3">
+      <li>{% t "Open the downloaded file. If Android asks, allow “Install unknown apps” for your browser or WhatsApp." %}</li>
+      <li>{% t "Open the app and enter the server address shown on the left (only the first time)." %}</li>
+      <li>{% t "Log in as usual. Downloads (PDF, CSV) go to the phone's Downloads folder." %}</li>
+    </ol>
+    <p class="small mb-1 mt-3">{% t "Option 2 – without the APK:" %}</p>
+    {% endif %}
+    <ol class="small ps-3 mb-2">
+      <li>{% t "Open this site in Chrome." %}</li>
+      <li>{% t "Tap the menu ⋮ and choose “Install app” (or “Add to Home screen”)." %}</li>
+    </ol>
+    <button type="button" class="btn btn-sm btn-success d-none" id="install-btn"><i class="bi bi-plus-square"></i> {% t "Install now" %}</button>
+  </div></div></div>
+
+  <div class="col-lg-4"><div class="card h-100"><div class="card-body">
+    <h6><i class="bi bi-apple"></i> {% t "iPhone / iPad" %}</h6>
+    <ol class="small ps-3">
+      <li>{% t "Open this site in Safari." %}</li>
+      <li>{% t "Tap the Share button (square with an arrow)." %}</li>
+      <li>{% t "Choose “Add to Home Screen”, then “Add”." %}</li>
+    </ol>
+    <p class="small text-muted mb-0">{% t "The app then opens full screen from its own icon, like any other app." %}</p>
+  </div></div></div>
+</div>
+{% if not is_https %}<div class="alert alert-warning small mt-3 mb-0"><i class="bi bi-info-circle"></i> {% t "This server uses http://, so Chrome may only offer “Add to Home screen” and the offline page won't work. With https:// the full install works. The Android app (APK) works with both." %}</div>{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const copy = document.getElementById("copy-link"), share = document.getElementById("share-link");
+  copy.addEventListener("click", () => navigator.clipboard && navigator.clipboard.writeText(copy.dataset.url).then(() => {
+    copy.innerHTML = '<i class="bi bi-check2"></i> ' + copy.textContent.trim();
+  }));
+  if (navigator.share) {
+    share.classList.remove("d-none");
+    share.addEventListener("click", () => navigator.share({ title: document.title, url: share.dataset.url }).catch(() => {}));
+  }
+  const btn = document.getElementById("install-btn");
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    btn.classList.remove("d-none");
+    btn.onclick = () => { e.prompt(); btn.classList.add("d-none"); };
+  });
+})();
+</script>
+{% endblock %}

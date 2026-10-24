@@ -1,0 +1,5 @@
+.venv-mobile/
+build/
+dist/
+logs/
+src/pms_mobile/resources/

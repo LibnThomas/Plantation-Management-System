@@ -1,0 +1,50 @@
+# Phone app (Android .apk / iPhone) of the Plantation Management System - built with BeeWare Briefcase.
+# Build:  ./build_android.sh   or   ./build_ios.sh     (see README.md in this folder)
+
+[tool.briefcase]
+project_name = "Plantation MS"
+bundle = "com.mentorssofttech"
+version = "1.0.0"
+url = "https://mentorssofttech.com"
+license.text = "Proprietary - Mentors Soft Tech. All rights reserved."
+author = "Mentors Soft Tech"
+author_email = "support@mentorssofttech.com"
+
+[tool.briefcase.app.pms_mobile]
+formal_name = "Plantation MS"
+description = "Plantation Management System - works fully offline on this phone"
+long_description = "Workers, attendance, wages, harvest, processing, sales and reports for a cardamom estate. The whole app and its database run inside the phone; no internet is needed."
+icon = "icons/pms"
+sources = ["src/pms_mobile"]
+# The Django app itself is packed into src/pms_mobile/resources/django_app.zip by make_bundle.py.
+# Same packages as the server, minus PostgreSQL / gunicorn (the phone uses SQLite).
+requires = [
+    "django>=5.1,<5.3",
+    "fpdf2>=2.8,<2.9",
+    "pillow",
+    "cryptography",
+    "segno>=1.6",
+]
+
+[tool.briefcase.app.pms_mobile.android]
+requires = ["toga-android~=0.5.0"]
+base_theme = "Theme.MaterialComponents.Light.DarkActionBar"
+build_gradle_dependencies = [
+    "com.google.android.material:material:1.12.0",
+    "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0",
+    "androidx.webkit:webkit:1.15.0",
+]
+# Toga's web view needs its static proxy (page-load events, large content)
+build_gradle_extra_content = """
+chaquopy.defaultConfig.staticProxy("toga_android.widgets.internal.webview")
+"""
+# Phones from Android 7 (API 24) on.
+min_os_version = "24"
+
+[tool.briefcase.app.pms_mobile.iOS]
+requires = ["toga-iOS~=0.5.0", "std-nslog~=1.0.3"]
+min_os_version = "13.0"
+# The app talks to its own server on 127.0.0.1 inside the phone (plain http, never the internet)
+info."NSAppTransportSecurity" = { NSAllowsLocalNetworking = true, NSAllowsArbitraryLoadsInWebContent = true }
+info."UIFileSharingEnabled" = true
+info."LSSupportsOpeningDocumentsInPlace" = true

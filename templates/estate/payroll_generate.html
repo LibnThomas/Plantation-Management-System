@@ -1,0 +1,48 @@
+{% extends "base.html" %}{% load estate_tags core_tags %}
+{% block title %}{% t "Generate Payroll" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1><i class="bi bi-calculator text-primary"></i> {% t "Generate Payroll" %}</h1>
+  <div class="text-muted small">{% t "Calculates pay for a period. Registered employees: from attendance and individual work details (wage and OT rate from their Individual work details for the day, else the Job type's wage for that date). Day labourers in the Daily Labour Count: count × wage per worker plus overtime, as entered each day, with one payment per gang leader." %}</div></div>
+</div>
+<div class="card mb-3"><div class="card-body">
+  <form method="post" class="row g-2 align-items-end">{% csrf_token %}
+    {% if form.non_field_errors %}<div class="col-12 alert alert-danger py-2">{{ form.non_field_errors }}</div>{% endif %}
+    {% for name in "date_from date_to employment_type job_type"|split %}{% with f=form|field:name %}
+    <div class="col-6 col-md-2"><label class="form-label small mb-0" for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{% for e in f.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}</div>
+    {% endwith %}{% endfor %}
+    <div class="col-12 col-md-auto">
+      <div class="form-check">{{ form.include_employees }} <label class="form-check-label small" for="{{ form.include_employees.id_for_label }}">{{ form.include_employees.label }}</label></div>
+      <div class="form-check">{{ form.include_counts }} <label class="form-check-label small" for="{{ form.include_counts.id_for_label }}">{{ form.include_counts.label }}</label></div>
+    </div>
+    <div class="col-12 col-md-auto"><div class="form-check">{{ form.overwrite }} <label class="form-check-label small" for="{{ form.overwrite.id_for_label }}">{{ form.overwrite.label }}</label></div>
+      <div class="form-check">{{ form.include_pending }} <label class="form-check-label small" for="{{ form.include_pending.id_for_label }}">{{ form.include_pending.label }}</label></div></div>
+    <div class="col-12 col-md-auto d-flex gap-2">
+      <button class="btn btn-outline-primary" name="preview" value="1"><i class="bi bi-eye"></i> {% t "Preview" %}</button>
+      {% if preview %}<button class="btn btn-primary" name="confirm" value="1"><i class="bi bi-check2"></i> {% t "Create payroll" %}</button>{% endif %}
+    </div>
+  </form>
+</div></div>
+
+{% if preview %}
+<div class="card">
+  <div class="card-header d-flex justify-content-between"><span>{% t "Preview" %} · {% t "{n} payments" n=preview|length %}</span><span>{% if preview_pending %}{% t "Includes previous pending" %}: {{ CURRENCY }} {{ preview_pending|inr }} · {% endif %}{% t "Total" %}: {{ CURRENCY }} {{ preview_total|inr }}</span></div>
+  <div class="table-responsive"><table class="table table-sm table-data mb-0">
+    <thead><tr><th>{% t "Paid to" %}</th><th>{% t "Job" %}</th><th class="num">{% t "Days / man-days" %}</th><th class="num">{% t "Half days" %}</th><th class="num">{% t "Leave days" %}</th><th class="num">{% t "OT hours" %}</th><th>{% t "How it was calculated" %}</th><th class="num">{% t "Basic" %}</th><th class="num">{% t "OT amount" %}</th><th class="num">{% t "Net (before deductions)" %}</th><th class="num">{% t "Previous pending" %}</th><th class="num">{% t "Total payable" %}</th><th>{% t "Status" %}</th></tr></thead>
+    <tbody>{% for r in preview %}<tr class="{% if r.status == 'exists' %}table-secondary{% endif %}">
+      <td>{% if r.is_count %}<span class="badge text-bg-info me-1" title="{% t 'Daily labour count' %}"><i class="bi bi-people"></i></span>{% if r.leader %}{{ r.leader }}{% else %}{% t "Daily labour count (no gang leader)" %}{% endif %}{% else %}{{ r.emp.full_name }}{% endif %}</td>
+      <td>{% if r.is_count %}{% for l in r.lines %}{{ l.job }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{{ r.emp.job_type }}{% endif %}</td><td class="num">{{ r.full|num }}</td><td class="num">{{ r.half }}</td><td class="num">{{ r.leave }}</td>
+      <td class="num">{{ r.ot|num }}</td>
+      <td class="small">{% for l in r.lines %}<div class="text-nowrap">{{ l.days|num }} × {{ l.rate|inr }}{% if l.ot_hours|num != "0" %} + {{ l.ot_hours|num }} h × {{ l.ot_rate|inr }}{% endif %} <span class="badge badge-soft">{{ r.labels|get_index:forloop.counter0 }}</span></div>{% endfor %}</td>
+      <td class="num">{{ r.basic|inr }}</td><td class="num">{{ r.ot_amount|inr }}</td><td class="num">{{ r.net|inr }}</td>
+      <td class="num">{% if r.pending %}{% for o in r.pending_from %}<a class="d-block text-nowrap" href="{% url 'estate:payslip' o.pk %}" title="{{ o.period_from|date:'d/m/y' }} – {{ o.period_to|date:'d/m/y' }}">{{ o.balance|inr }}</a>{% endfor %}{% else %}–{% endif %}</td>
+      <td class="num fw-semibold">{{ r.payable|inr }}</td>
+      <td>{% if r.status == 'new' %}<span class="badge text-bg-success">{% t "New" %}</span>{% elif r.status == 'update' %}<span class="badge text-bg-warning">{% t "Re-calculate" %}</span>{% else %}<span class="badge text-bg-secondary">{% t "Already exists" %}</span>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="card-footer bg-white small text-muted">{% t "After creating, open each payment to add bonus, advance and other deductions, then record what you pay (all or part; the rest stays pending)." %}</div>
+</div>
+{% elif request.method == 'POST' %}
+<div class="alert alert-info">{% t "Nothing to pay for the selected period / filters (no attendance, individual work or daily labour count)." %}</div>
+{% endif %}
+{% endblock %}

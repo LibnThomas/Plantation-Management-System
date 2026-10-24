@@ -1,0 +1,5 @@
+{% load core_tags %}<ul class="nav nav-tabs mb-3 no-print attendance-tabs">
+  <li class="nav-item"><a class="nav-link{% if tab == 'calendar' %} active{% endif %}" href="{% url 'estate:attendance_calendar' %}"><i class="bi bi-calendar3"></i> {% t "Calendar" %}</a></li>
+  <li class="nav-item"><a class="nav-link{% if tab == 'list' %} active{% endif %}" href="{% url 'estate:list' 'attendance' %}"><i class="bi bi-list"></i> {% t "Records" %}</a></li>
+  <li class="nav-item"><a class="nav-link{% if tab == 'daily' %} active{% endif %}" href="{% url 'estate:attendance_bulk' %}"><i class="bi bi-ui-checks-grid"></i> {% t "Mark Daily Attendance" %}</a></li>
+</ul>

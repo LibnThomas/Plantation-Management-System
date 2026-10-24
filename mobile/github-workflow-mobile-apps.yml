@@ -1,0 +1,62 @@
+# Builds the phone apps on GitHub's computers (no Android Studio / Xcode needed on yours).
+# GitHub > Actions > "Phone apps" > Run workflow. When it finishes, download the files under "Artifacts":
+#   plantation-ms-android   -> plantation-ms.apk            (install on any Android phone)
+#   plantation-ms-ios       -> plantation-ms-unsigned.ipa   (install with Sideloadly / AltStore + your Apple ID)
+name: Phone apps
+
+on:
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the APK
+        run: |
+          python -m pip install "briefcase>=0.4,<0.5"
+          python make_bundle.py
+          (yes || true) | briefcase create android
+          briefcase build android
+          briefcase package android --packaging-format debug-apk
+          mkdir -p out && cp "$(ls -t dist/*.apk | head -1)" out/plantation-ms.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plantation-ms-android
+          path: mobile/out/plantation-ms.apk
+
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the unsigned IPA
+        run: |
+          python -m pip install "briefcase>=0.4,<0.5"
+          python make_bundle.py
+          briefcase create iOS --no-input
+          project=$(ls -d build/pms_mobile/ios/xcode/*.xcodeproj | head -1)
+          scheme=$(basename "$project" .xcodeproj)
+          xcodebuild -project "$project" -scheme "$scheme" -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/ipa \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          mkdir -p build/ipa/Payload out
+          cp -R "$(ls -d build/ipa/Build/Products/Release-iphoneos/*.app | head -1)" build/ipa/Payload/
+          (cd build/ipa && zip -qry ../../out/plantation-ms-unsigned.ipa Payload)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plantation-ms-ios
+          path: mobile/out/plantation-ms-unsigned.ipa

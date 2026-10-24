@@ -1,0 +1,162 @@
+{% load static core_tags %}<!doctype html>
+<html lang="{{ CURRENT_LANG }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="{{ APP.header_color }}">
+  <title>{% block title %}{% t "Plantation Management System" %}{% endblock %} · {{ ESTATE_NAME }}</title>
+  <link href="{% static 'vendor/bootstrap/bootstrap.min.css' %}" rel="stylesheet">
+  <link href="{% static 'vendor/bootstrap-icons/bootstrap-icons.min.css' %}" rel="stylesheet">
+  <link href="{% static 'vendor/flatpickr/flatpickr.min.css' %}" rel="stylesheet">
+  <link href="{% static 'css/app.css' %}?v={{ ASSET_V }}" rel="stylesheet">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" href="{% static 'icons/favicon-32.png' %}">
+  <link rel="apple-touch-icon" href="{% static 'icons/apple-touch-icon.png' %}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PMS">
+  <style>{{ THEME_CSS|safe }}</style>
+  <script>window.pmsGo = window.pmsGo || function (url) { window.location.href = url; };</script>
+  {% block head %}{% endblock %}
+</head>
+<body class="lang-{{ CURRENT_LANG }}">
+{% if user.is_authenticated %}
+{% if not POPUP %}
+<nav class="navbar topbar sticky-top">
+  <div class="container-fluid">
+    <button class="btn btn-link text-white d-lg-none p-0 me-2" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-label="{% t 'Menu' %}">
+      <i class="bi bi-list fs-3"></i>
+    </button>
+    <a class="navbar-brand text-white fw-semibold d-flex align-items-center gap-2" href="{% url 'dashboard' %}">
+      {% if APP.logo_type %}<img class="app-logo" src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="">{% else %}<i class="bi bi-flower3"></i>{% endif %}<span class="d-none d-sm-inline">{% t "Plantation Management System" %}</span><span class="d-sm-none">PMS</span>
+    </a>
+    <div class="ms-auto d-flex align-items-center gap-2">
+      {% if DEMO_MODE %}<span class="badge text-bg-warning d-none d-md-inline"><i class="bi bi-easel"></i> {% t "DEMO" %}</span>{% endif %}
+      <span class="text-white-50 small d-none d-lg-inline">{{ ESTATE_NAME }}</span>
+      <form method="post" action="{% url 'core:set_language' %}" class="d-flex">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <select name="language" class="form-select form-select-sm lang-select" onchange="this.form.submit()" aria-label="{% t 'Language' %}">
+          {% for code, name in LANGUAGES_UI %}<option value="{{ code }}" {% if code == CURRENT_LANG %}selected{% endif %}>{{ name }}</option>{% endfor %}
+        </select>
+      </form>
+      <div class="dropdown">
+        <button class="btn btn-sm btn-outline-light dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-person-circle"></i> <span class="d-none d-sm-inline">{{ user.username }}</span></button>
+        <ul class="dropdown-menu dropdown-menu-end">
+          <li><h6 class="dropdown-header">{% t "Text size" %}</h6></li>
+          <li class="px-3 pb-2"><form method="post" action="{% url 'core:text_size' %}" class="d-flex gap-1">{% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            {% for value, label in TEXT_SIZES %}<button name="size" value="{{ value }}" class="btn btn-sm {% if value == TEXT_SIZE %}btn-primary{% else %}btn-outline-secondary{% endif %}" title="{{ label }}" style="font-size:{% widthratio value 100 13 %}px">A</button>{% endfor %}
+          </form></li>
+          <li><hr class="dropdown-divider"></li>
+          {% if user.is_superuser %}<li><a class="dropdown-item" href="{% url 'core:app_settings' %}"><i class="bi bi-sliders"></i> {% t "App Settings" %}</a></li>{% endif %}
+          <li><a class="dropdown-item" href="{% url 'core:demo' %}"><i class="bi bi-easel"></i> {% t "Demo mode" %}</a></li>
+          {% if user.is_staff %}
+          <li><a class="dropdown-item" href="{% url 'core:labels' %}"><i class="bi bi-translate"></i> {% t "Labels & translations" %}</a></li>
+          <li><a class="dropdown-item" href="{% url 'admin:index' %}"><i class="bi bi-shield-lock"></i> {% t "Admin / Users" %}</a></li>
+          {% endif %}
+          {% if not MOBILE_APP %}<li><a class="dropdown-item" href="{% url 'install' %}"><i class="bi bi-phone"></i> {% t "Install the app" %}</a></li>{% endif %}
+          <li class="d-none" data-app-only><a class="dropdown-item" href="#" onclick="window.PMSApp.changeServer(); return false;"><i class="bi bi-hdd-network"></i> {% t "Change server" %}</a></li>
+          <li><a class="dropdown-item" href="{% url 'password_change' %}"><i class="bi bi-key"></i> {% t "Change password" %}</a></li>
+          <li><hr class="dropdown-divider"></li>
+          <li><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="dropdown-item"><i class="bi bi-box-arrow-right"></i> {% t "Logout" %}</button></form></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</nav>
+{% if LICENCE and LICENCE.show_banner %}
+<div class="sub-banner text-center {% if LICENCE.state == 'expired' %}text-bg-danger{% elif LICENCE.state == 'grace' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
+  <i class="bi bi-shield-exclamation"></i>
+  {% if LICENCE.state == 'expired' %}{% t "The subscription has ended. The app is read-only: you can view and export, but not save. Your data is safe." %}
+  {% elif LICENCE.state == 'grace' %}{% t "Payment pending: the subscription ended on {date}. The app becomes read-only on {ro}." date=LICENCE.valid_until|date:"d/m/y" ro=LICENCE.read_only_from|date:"d/m/y" %}
+  {% elif LICENCE.is_trial %}{% t "Free trial: {n} days left." n=LICENCE.days_left %}
+  {% else %}{% t "The subscription ends on {date} ({n} days left). Please renew." date=LICENCE.valid_until|date:"d/m/y" n=LICENCE.days_left %}{% endif %}
+  {% if user.is_superuser %}<a class="btn btn-sm btn-light py-0 ms-2" href="{% url 'core:app_settings' %}?tab=subscription">{% t "Renew" %}</a>{% endif %}
+</div>
+{% endif %}
+{% if DEMO_MODE %}
+<div class="demo-banner d-flex flex-wrap align-items-center justify-content-center gap-2">
+  <span><i class="bi bi-easel"></i> {% t "Demo mode: you are looking at sample data. Your own data is safe and unchanged." %}</span>
+  <form method="post" action="{% url 'core:demo' %}">{% csrf_token %}<input type="hidden" name="action" value="disable">
+    <button class="btn btn-sm btn-dark py-0">{% t "Back to my data" %}</button></form>
+</div>
+{% endif %}
+
+{% endif %}
+<div class="layout">
+  {% if not POPUP %}
+  <aside class="offcanvas-lg offcanvas-start sidebar" tabindex="-1" id="sidebar">
+    <div class="offcanvas-header d-lg-none">
+      <h5 class="offcanvas-title"><i class="bi bi-flower3"></i> {% t "Menu" %}</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-bs-target="#sidebar"></button>
+    </div>
+    <div class="offcanvas-body flex-column p-0">
+      {% with p=request.path %}
+      <nav class="nav flex-column py-2 w-100">
+        <a class="nav-link {% if p == '/' %}active{% endif %}" href="{% url 'dashboard' %}"><i class="bi bi-speedometer2"></i> {% t "Dashboard" %}</a>
+        <div class="nav-section">{% t "Quick entry" %}</div>
+        <a class="nav-link {% if 'attendance/daily' in p %}active{% endif %}" href="{% url 'estate:attendance_bulk' %}"><i class="bi bi-ui-checks-grid"></i> {% t "Mark Daily Attendance" %}</a>
+        <a class="nav-link {% if 'payroll/generate' in p %}active{% endif %}" href="{% url 'estate:payroll_generate' %}"><i class="bi bi-calculator"></i> {% t "Generate Payroll" %}</a>
+        {% for g in MENU %}
+          <div class="nav-section">{{ g.label }}</div>
+          {% for item in g.items %}
+            <a class="nav-link {% if '/m/'|add:item.cfg.slug|add:'/' in p %}active{% endif %}" href="{% if item.cfg.slug == 'attendance' %}{% url 'estate:attendance_calendar' %}{% else %}{% url 'estate:list' item.cfg.slug %}{% endif %}"><i class="bi {{ item.cfg.icon }}"></i> {{ item.title }}</a>
+          {% endfor %}
+          {% if g.key == 'Finance' %}
+          <div class="nav-section">{% t "Reports & Analysis" %}</div>
+          <a class="nav-link {% if 'reports/analysis' in p %}active{% endif %}" href="{% url 'reports:analysis' %}"><i class="bi bi-bar-chart-line"></i> {% t "Analysis" %}</a>
+          <a class="nav-link {% if 'reports/builder' in p %}active{% endif %}" href="{% url 'reports:builder' %}"><i class="bi bi-funnel"></i> {% t "Report Builder" %}</a>
+          {% endif %}
+        {% endfor %}
+        <a class="nav-link {% if '/m/lists/' in p %}active{% endif %}" href="{% url 'estate:lookups' %}"><i class="bi bi-list-ul"></i> {% t "Drop-down lists" %}</a>
+        {% if user.is_staff %}<a class="nav-link {% if '/settings/labels' in p %}active{% endif %}" href="{% url 'core:labels' %}"><i class="bi bi-translate"></i> {% t "Labels & translations" %}</a>{% endif %}
+        {% if user.is_superuser %}<a class="nav-link {% if '/settings/app' in p %}active{% endif %}" href="{% url 'core:app_settings' %}"><i class="bi bi-sliders"></i> {% t "App Settings" %}</a>{% endif %}
+        <a class="nav-link {% if '/settings/demo' in p %}active{% endif %}" href="{% url 'core:demo' %}"><i class="bi bi-easel"></i> {% t "Demo mode" %}</a>
+      </nav>
+      {% endwith %}
+    </div>
+  </aside>
+  {% endif %}
+
+  <main class="content{% if POPUP %} popup-content{% endif %}">
+    {% for message in messages %}
+      <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags|default:'info' }}{% endif %} alert-dismissible fade show" role="alert">
+        {{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="{% t 'Close' %}"></button>
+      </div>
+    {% endfor %}
+    {% block content %}{% endblock %}
+    {% if not POPUP %}<div class="footer-space"></div>{% endif %}
+  </main>
+</div>
+
+{% if not POPUP %}
+<nav class="bottom-nav d-lg-none">
+  <a href="{% url 'dashboard' %}"><i class="bi bi-house"></i><span>{% t "Home" %}</span></a>
+  <a href="{% url 'estate:attendance_bulk' %}"><i class="bi bi-calendar-check"></i><span>{% t "Attendance" %}</span></a>
+  <a href="{% url 'estate:create' 'harvests' %}" class="primary"><i class="bi bi-plus-lg"></i><span>{% t "Harvest" %}</span></a>
+  <a href="{% url 'reports:analysis' %}"><i class="bi bi-bar-chart"></i><span>{% t "Analysis" %}</span></a>
+  <a href="#" data-bs-toggle="offcanvas" data-bs-target="#sidebar"><i class="bi bi-grid"></i><span>{% t "More" %}</span></a>
+</nav>
+{% endif %}
+{% else %}
+  {% block auth_content %}{% endblock %}
+{% endif %}
+
+<script src="{% static 'vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
+<script src="{% static 'vendor/flatpickr/flatpickr.min.js' %}"></script>
+<script src="{% static 'js/dates.js' %}?v={{ ASSET_V }}"></script>
+<script id="confirm-text" type="application/json">{"title": "{% filter escapejs %}{% t 'Delete this record?' %}{% endfilter %}", "warn": "{% filter escapejs %}{% t 'This cannot be undone.' %}{% endfilter %}", "yes": "{% filter escapejs %}{% t 'Yes, delete' %}{% endfilter %}", "cancel": "{% filter escapejs %}{% t 'Cancel' %}{% endfilter %}"}</script>
+<script src="{% static 'js/confirm.js' %}?v={{ ASSET_V }}"></script>
+<script>
+  // the phone app (installed from the APK) adds window.PMSApp; installed web apps use the service worker
+  if (window.PMSApp) document.querySelectorAll("[data-app-only]").forEach((el) => el.classList.remove("d-none"));
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+</script>
+{% if user.is_authenticated %}{{ TABLE_TOOLS_TEXT|json_script:"table-tools-text" }}
+<script src="{% static 'js/table-tools.js' %}?v={{ ASSET_V }}"></script>{% endif %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

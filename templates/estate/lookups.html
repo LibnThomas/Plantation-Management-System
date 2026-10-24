@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% load core_tags %}
+{% block title %}{% t "Drop-down lists" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1><i class="bi bi-list-ul text-primary"></i> {% t "Drop-down lists" %}</h1>
+  <div class="text-muted small">{% t "Every choice offered in the forms comes from these lists. Add, rename, translate, reorder or switch off values here." %}</div></div>
+</div>
+<div class="row g-3">
+  {% for it in items %}
+  <div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+    <a class="card lookup-card h-100 text-decoration-none text-reset" href="{% url 'estate:list' it.cfg.slug %}">
+      <div class="card-body d-flex align-items-center gap-3">
+        <i class="bi {{ it.cfg.icon }} fs-3 text-primary"></i>
+        <div><div class="fw-semibold">{{ it.title }}</div><div class="small text-muted">{% t "{n} values" n=it.count %}</div></div>
+      </div>
+    </a>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

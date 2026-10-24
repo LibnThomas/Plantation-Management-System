@@ -1,0 +1,155 @@
+{% extends "base.html" %}{% load estate_tags core_tags static %}
+{% block title %}{% t "Analysis" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1><i class="bi bi-bar-chart-line text-primary"></i> {% t "Analysis" %}</h1>
+    <div class="text-muted small">{{ d1|date:"d/m/y" }} – {{ d2|date:"d/m/y" }}</div></div>
+  <div class="d-flex gap-2 no-print">
+    <a class="btn btn-sm btn-primary" href="?{{ request.GET.urlencode }}&export=pdf"><i class="bi bi-file-earmark-pdf"></i> PDF</a>
+    <a class="btn btn-sm btn-outline-primary" href="{% url 'reports:builder' %}"><i class="bi bi-funnel"></i> {% t "Custom report" %}</a>
+  </div>
+</div>
+
+<div class="card mb-3 no-print"><div class="card-body py-2">
+  <form method="get" class="filter-bar row g-2 align-items-end">
+    <div class="col-12 col-md-auto">
+      <div class="form-label small mb-0">{% t "Quick range" %}</div>
+      <div class="btn-group btn-group-sm flex-wrap">
+        <a class="btn btn-outline-secondary" href="?range=this_month&period=day">{% t "This month" %}</a>
+        <a class="btn btn-outline-secondary" href="?range=this_season&period=month">{% t "This season" %}</a>
+        <a class="btn btn-outline-secondary" href="?range=this_fy&period=month">{% t "This FY" %}</a>
+        <a class="btn btn-outline-secondary" href="?range=last_fy&period=quarter">{% t "Last FY" %}</a>
+        <a class="btn btn-outline-secondary" href="?range=last_12&period=month">{% t "Last 12 months" %}</a>
+      </div>
+    </div>
+    <div class="col-6 col-md-2"><label class="form-label small mb-0" for="a-from">{% t "From" %}</label><input id="a-from" type="text" name="date_from" value="{{ d1|date:'d/m/y' }}" class="form-control form-control-sm pms-date" placeholder="DD/MM/YY" autocomplete="off"></div>
+    <div class="col-6 col-md-2"><label class="form-label small mb-0" for="a-to">{% t "To" %}</label><input id="a-to" type="text" name="date_to" value="{{ d2|date:'d/m/y' }}" class="form-control form-control-sm pms-date" placeholder="DD/MM/YY" autocomplete="off"></div>
+    <div class="col-6 col-md-2"><label class="form-label small mb-0" for="a-per">{% t "Group by" %}</label>
+      <select id="a-per" name="period" class="form-select form-select-sm">{% for k, v in periods %}<option value="{{ k }}" {% if k == period %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
+    <div class="col-6 col-md-2"><label class="form-label small mb-0" for="a-prod">{% t "Product" %}</label>
+      <select id="a-prod" name="product" class="form-select form-select-sm"><option value="">{% t "All products" %}</option>{% for p in products %}<option value="{{ p.pk }}" {% if p.pk|stringformat:'s' == product %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+    <div class="col-12 col-md-auto"><button class="btn btn-sm btn-primary"><i class="bi bi-arrow-repeat"></i> {% t "Update" %}</button></div>
+  </form>
+</div></div>
+
+<nav class="nav nav-pills small mb-3 flex-nowrap overflow-auto no-print">
+  <a class="nav-link" href="#summary">{% t "Summary" %}</a><a class="nav-link" href="#production">{% t "Production" %}</a>
+  <a class="nav-link" href="#costs">{% t "Costs" %}</a><a class="nav-link" href="#labour">{% t "Labour" %}</a>
+  <a class="nav-link" href="#inputs">{% t "Fertilizer" %}</a><a class="nav-link" href="#blocks">{% t "Blocks" %}</a>
+  <a class="nav-link" href="#workforce">{% t "Workforce" %}</a>
+</nav>
+
+<div class="row g-3 mb-3" id="summary">
+  <div class="col-6 col-lg-3"><div class="kpi"><div class="label">{% t "Total cost" %}</div><div class="value">{{ CURRENCY }}{{ cost_total|inr:0 }}</div><div class="sub">{% t "All labour, inputs, processing and expenses" %}</div></div></div>
+  <div class="col-6 col-lg-3"><div class="kpi"><div class="label">{% t "Sales revenue" %}</div><div class="value">{{ CURRENCY }}{{ sales_total|inr:0 }}</div><div class="sub">{% t "{n} products sold" n=sales|length %}</div></div></div>
+  <div class="col-6 col-lg-3"><div class="kpi"><div class="label">{% t "Profit / (Loss)" %}</div><div class="value {% if profit < 0 %}text-danger{% else %}text-success{% endif %}">{{ CURRENCY }}{{ profit|inr:0 }}</div><div class="sub">{% t "Revenue minus total cost" %}</div></div></div>
+  <div class="col-6 col-lg-3"><div class="kpi"><div class="label">{% t "Cost per unit of main product" %}</div><div class="value">{% if cost_per_unit %}{{ CURRENCY }}{{ cost_per_unit|inr }}{% else %}–{% endif %}</div><div class="sub">{% if main_output %}{% t "Total cost ÷ {qty} {unit} {product}" qty=main_output.output|num unit=main_output.unit product=main_output.product %}{% endif %}</div></div></div>
+</div>
+
+<div class="row g-3 mb-3" id="production">
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">{% t "Harvest (raw quantity)" %}</div>
+    <div class="card-body"><div class="chart-box"><canvas id="prodChart"></canvas></div></div>
+    {% include "reports/_period_table.html" with block=prod %}
+  </div></div>
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">{% t "Processed output" %}</div>
+    <div class="card-body"><div class="chart-box"><canvas id="procChart"></canvas></div></div>
+    {% include "reports/_period_table.html" with block=proc %}
+  </div></div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-7"><div class="card h-100"><div class="card-header">{% t "Processing recovery by product" %}</div>
+    <div class="table-responsive"><table class="table table-sm table-data mb-0">
+      <thead><tr><th>{% t "Product" %}</th><th class="num">{% t "Batches" %}</th><th class="num">{% t "Raw input" %}</th><th class="num">{% t "Output" %}</th><th class="num">{% t "Recovery %" %}</th><th class="num">{% t "Ratio (in:out)" %}</th><th class="num">{% t "Processing cost / unit" %}</th></tr></thead>
+      <tbody>{% for r in recovery %}<tr><td>{{ r.product }}</td><td class="num">{{ r.batches }}</td><td class="num">{{ r.input|num }}</td><td class="num">{{ r.output|num }} {{ r.unit }}</td>
+        <td class="num">{{ r.recovery|floatformat:2 }}</td><td class="num">{{ r.ratio|floatformat:2 }} : 1</td><td class="num">{{ r.cost_per_unit|inr }}</td></tr>
+      {% empty %}<tr><td colspan="7" class="text-center text-muted">{% t "No processing batches in this period" %}</td></tr>{% endfor %}</tbody>
+    </table></div></div></div>
+  <div class="col-lg-5"><div class="card h-100"><div class="card-header">{% t "Sales by product" %}</div>
+    <div class="table-responsive"><table class="table table-sm table-data mb-0">
+      <thead><tr><th>{% t "Product" %}</th><th class="num">{% t "Quantity" %}</th><th class="num">{% t "Revenue" %}</th><th class="num">{% t "Average rate" %}</th></tr></thead>
+      <tbody>{% for s in sales %}<tr><td>{{ s.name }}</td><td class="num">{{ s.qty|num }}</td><td class="num">{{ s.amount|inr:0 }}</td><td class="num">{{ s.avg_rate|inr }}</td></tr>
+      {% empty %}<tr><td colspan="4" class="text-center text-muted">{% t "No sales in this period" %}</td></tr>{% endfor %}</tbody>
+    </table></div></div></div>
+</div>
+
+<div class="row g-3 mb-3" id="costs">
+  <div class="col-lg-7"><div class="card h-100"><div class="card-header">{% t "Cost by period and category" %}</div>
+    <div class="card-body"><div class="chart-box"><canvas id="costChart"></canvas></div></div></div></div>
+  <div class="col-lg-5"><div class="card h-100"><div class="card-header">{% t "Cost breakdown (where to invest / control)" %}</div>
+    <div class="table-responsive"><table class="table table-sm table-data mb-0">
+      <thead><tr><th>{% t "Category" %}</th><th class="num">{% t "Amount" %}</th><th class="num">{% t "Share" %}</th></tr></thead>
+      <tbody>{% for c in cost_items %}<tr><td>{{ c.name }}</td><td class="num">{{ c.amount|inr:0 }}</td>
+        <td class="num"><div class="d-flex align-items-center justify-content-end gap-2"><div class="progress" style="width:60px;height:6px"><div class="progress-bar bg-success" style="width:{{ c.pct|floatformat:0 }}%"></div></div>{{ c.pct|floatformat:1 }}%</div></td></tr>
+      {% empty %}<tr><td colspan="3" class="text-center text-muted">{% t "No costs in this period" %}</td></tr>{% endfor %}</tbody>
+      <tfoot><tr><td>{% t "Total" %}</td><td class="num">{{ cost_total|inr:0 }}</td><td></td></tr></tfoot>
+    </table></div></div></div>
+</div>
+
+<div class="row g-3 mb-3" id="labour">
+  <div class="col-lg-7"><div class="card h-100"><div class="card-header">{% t "Labour cost by work type: which work costs more?" %}</div>
+    <div class="card-body"><div class="chart-box"><canvas id="labourChart"></canvas></div></div></div></div>
+  <div class="col-lg-5"><div class="card h-100"><div class="card-header">{% t "Labour cost table" %}</div>
+    <div class="table-responsive"><table class="table table-sm table-data mb-0">
+      <thead><tr><th>{% t "Work type" %}</th><th class="num">{% t "Amount" %}</th><th class="num">{% t "Share" %}</th></tr></thead>
+      <tbody>{% for l in labour %}<tr><td>{{ l.name }}</td><td class="num">{{ l.amount|inr:0 }}</td><td class="num">{{ l.pct|floatformat:1 }}%</td></tr>
+      {% empty %}<tr><td colspan="3" class="text-center text-muted">{% t "No labour data" %}</td></tr>{% endfor %}</tbody>
+      <tfoot><tr><td>{% t "Total" %}</td><td class="num">{{ labour_total|inr:0 }}</td><td></td></tr></tfoot>
+    </table></div>
+    <div class="card-footer bg-white small text-muted">{% t "Includes Work Details (individual + daily labour count) and any labour entered in Fertilizer & Field Work." %}</div>
+  </div></div>
+</div>
+
+<div class="row g-3 mb-3" id="inputs">
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">{% t "Fertilizer / chemical usage" %}</div>
+    <div class="table-responsive"><table class="table table-sm table-data mb-0">
+      <thead><tr><th>{% t "Fertilizer / chemical" %}</th><th class="num">{% t "Applications" %}</th><th class="num">{% t "Quantity" %}</th><th class="num">{% t "Cost" %}</th><th>{% t "Last used" %}</th></tr></thead>
+      <tbody>{% for i in inputs %}<tr><td>{{ i.name }}</td><td class="num">{{ i.n }}</td><td class="num">{{ i.qty|num }} {{ i.unit }}</td><td class="num">{{ i.cost|inr:0 }}</td><td>{{ i.last|date:"d/m/y" }}</td></tr>
+      {% empty %}<tr><td colspan="5" class="text-center text-muted">{% t "Nothing used in this period" %}</td></tr>{% endfor %}</tbody>
+    </table></div></div></div>
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">{% t "Last done per block: when did we last spray / manure?" %}</div>
+    <div class="table-responsive"><table class="table table-sm table-data mb-0">
+      <thead><tr><th>{% t "Block" %}</th>{% for k, label in last_ops.ops %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for b, vals in last_ops.rows %}<tr><td class="fw-semibold text-nowrap">{{ b }}</td>{% for v in vals %}<td class="text-nowrap">{{ v|date:"d/m/y"|default:"–" }}</td>{% endfor %}</tr>
+      {% empty %}<tr><td class="text-center text-muted">{% t "No field work recorded" %}</td></tr>{% endfor %}</tbody>
+    </table></div></div></div>
+</div>
+
+<div class="card mb-3" id="blocks"><div class="card-header">{% t "Block / plot performance" %}</div>
+  <div class="table-responsive"><table class="table table-sm table-data mb-0">
+    <thead><tr><th>{% t "Block" %}</th><th class="num">{% t "Area (acres)" %}</th><th>{% t "Harvest by product" %}</th><th class="num">{% t "Main crop harvest" %}</th><th class="num">{% t "Yield / acre" %}</th><th class="num">{% t "Cost" %}</th><th class="num">{% t "Cost / acre" %}</th></tr></thead>
+    <tbody>{% for b in blocks %}<tr><td class="fw-semibold">{{ b.block.name }}</td><td class="num">{{ b.block.area_acres|num }}</td>
+      <td class="small">{% for k, v in b.harvest.items %}{{ k }}: {{ v|num }}{% if not forloop.last %} · {% endif %}{% empty %}–{% endfor %}</td>
+      <td class="num">{{ b.total_qty|num }}</td><td class="num">{% if b.yield_per_acre is not None %}{{ b.yield_per_acre|num }}{% else %}–{% endif %}</td>
+      <td class="num">{{ b.cost|inr:0 }}</td><td class="num">{% if b.cost_per_acre is not None %}{{ b.cost_per_acre|inr:0 }}{% else %}–{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="7" class="text-center text-muted">{% t "Add blocks / plots to compare yield and cost per area." %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+
+<div class="row g-3 mb-3" id="workforce">
+  <div class="col-lg-5"><div class="card h-100"><div class="card-header">{% t "Man-days" %}</div>
+    <div class="card-body"><div class="chart-box"><canvas id="mandaysChart"></canvas></div></div></div></div>
+  <div class="col-lg-7"><div class="card h-100"><div class="card-header d-flex justify-content-between"><span>{% t "Employee attendance summary" %}</span>
+    <a class="small no-print" href="?{{ request.GET.urlencode }}&export=employees"><i class="bi bi-filetype-csv"></i> CSV</a></div>
+    <div class="table-responsive table-scroll"><table class="table table-sm table-data mb-0">
+      <thead><tr><th>{% t "Employee" %}</th><th>{% t "Job" %}</th>{% for s in statuses %}<th class="num">{{ s }}</th>{% endfor %}<th class="num">{% t "Man-days" %}</th><th class="num">{% t "OT hours" %}</th></tr></thead>
+      <tbody>{% for e in employees %}<tr><td><a href="{% url 'estate:employee_profile' e.emp.pk %}">{{ e.emp.full_name }}</a></td><td class="small">{{ e.emp.job_type }}</td>
+        {% for n in e.counts %}<td class="num">{{ n }}</td>{% endfor %}<td class="num">{{ e.mandays|num }}</td><td class="num">{{ e.ot|num }}</td></tr>
+      {% empty %}<tr><td colspan="9" class="text-center text-muted">{% t "No attendance in this period" %}</td></tr>{% endfor %}</tbody>
+    </table></div></div></div>
+</div>
+{{ charts|json_script:"chart-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'vendor/chartjs/chart.umd.min.js' %}"></script>
+<script src="{% static 'js/charts.js' %}?v={{ ASSET_V }}"></script>
+<script>
+const C = JSON.parse(document.getElementById("chart-data").textContent);
+const $ = (id) => document.getElementById(id);
+PMSCharts.bar($("prodChart"), C.prod.labels, C.prod.series, {stacked: true});
+PMSCharts.bar($("procChart"), C.proc.labels, C.proc.series, {stacked: true});
+PMSCharts.bar($("costChart"), C.costs.labels, C.costs.series, {stacked: true});
+if (C.labour.labels.length) PMSCharts.ranking($("labourChart"), C.labour.labels, C.labour.data, "{% filter escapejs %}{% t 'Labour cost' %}{% endfilter %}");
+PMSCharts.line($("mandaysChart"), C.mandays.labels, C.mandays.series);
+</script>
+{% endblock %}

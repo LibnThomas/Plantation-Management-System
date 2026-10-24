@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% load core_tags estate_tags %}
+{% block title %}{% t "Payment made" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1><i class="bi bi-cash-coin text-primary"></i> {% t "Payment made" %}</h1>
+    <div class="text-muted small">{{ p.payee_name }} · {% t "Payroll" %} {{ p.period_from|date:"d/m/y" }} – {{ p.period_to|date:"d/m/y" }}</div></div>
+  <div class="d-flex flex-wrap gap-2 no-print">
+    <a class="btn btn-sm btn-outline-primary" href="{% url 'estate:update' 'salary-payments' p.pk %}"><i class="bi bi-wallet2"></i> {% t "Open payroll" %}</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'estate:payslip' p.pk %}"><i class="bi bi-file-earmark-text"></i> {% t "Payslip" %}</a>
+    {% if can_edit %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'estate:update' 'salary-paid' pay.pk %}"><i class="bi bi-pencil"></i> {% t "Edit" %}</a>
+    <a class="btn btn-sm btn-outline-danger" href="{% url 'estate:delete' 'salary-paid' pay.pk %}" data-confirm data-kind="{% t 'Salary paid (payment made)' %}" data-name="{{ pay }}" data-next="{% url 'estate:update' 'salary-payments' p.pk %}"><i class="bi bi-trash"></i> {% t "Delete" %}</a>{% endif %}
+    <a class="btn btn-sm btn-link" href="{% url 'estate:list' 'salary-paid' %}">{% t "All payments" %}</a>
+  </div>
+</div>
+<div class="card mb-3" style="max-width:900px"><div class="card-body">
+  {% if not pay.is_paid %}<div class="alert alert-warning small py-2"><i class="bi bi-hourglass-split"></i> {% t "This entry is Pending (not paid): it is not counted as paid and the balance is unchanged. Edit it and set the payment status to Paid once it is paid." %}</div>{% endif %}
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3"><div class="small text-muted">{% t "Date" %}</div><div class="fs-5 fw-semibold">{{ pay.date|date:"d/m/y" }}</div></div>
+    <div class="col-6 col-md-3"><div class="small text-muted">{% t "Amount" %}</div><div class="fs-5 fw-semibold {% if pay.is_paid %}text-success{% else %}text-muted{% endif %}">{{ CURRENCY }} {{ pay.amount|inr }}</div><div class="mt-1">{% include "estate/_pay_entry_status.html" %}</div></div>
+    <div class="col-6 col-md-3"><div class="small text-muted">{% t "Balance after this payment" %}</div><div class="fs-5 fw-semibold">{{ CURRENCY }} {{ pay.balance_after|inr }}</div></div>
+    <div class="col-6 col-md-3"><div class="small text-muted">{% t "Payment mode" %}</div><div class="fs-6">{{ pay.payment_mode|default:"–" }}</div>{% if pay.remarks %}<div class="small text-muted">{{ pay.remarks }}</div>{% endif %}</div>
+  </div>
+  <h2 class="h6"><i class="bi bi-clock-history text-primary"></i> {% t "Payment history of this payroll" %}</h2>
+  {% include "estate/_salary_history.html" %}
+</div></div>
+{% endblock %}

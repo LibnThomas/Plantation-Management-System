@@ -1,0 +1,72 @@
+{% extends "base.html" %}{% load core_tags estate_tags %}
+{% block title %}{% t "Attendance calendar" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1><i class="bi bi-calendar3 text-primary"></i> {% t "Attendance calendar" %}</h1>
+    <div class="text-muted small">{% t "Each person's month at a glance: every day is coloured by the attendance marked for it. Click a day to mark or change that day's attendance." %}</div></div>
+  <button class="btn btn-sm btn-link no-print" onclick="window.print()"><i class="bi bi-printer"></i> {% t "Print" %}</button>
+</div>
+{% include "estate/_attendance_tabs.html" with tab="calendar" %}
+
+<div class="card mb-3"><div class="card-body py-2">
+  <form method="get" class="row g-2 align-items-end no-print">
+    <div class="col-12 col-md-auto d-flex gap-1 align-items-end">
+      <a class="btn btn-sm btn-outline-secondary" href="?month={{ prev_month }}&employee={{ emp_filter }}&job_type={{ job_filter }}" aria-label="{% t 'Previous month' %}"><i class="bi bi-chevron-left"></i></a>
+      <div><label class="form-label small mb-0" for="cal-month">{% t "Month" %}</label>
+        <input id="cal-month" type="month" name="month" value="{{ month_value }}" class="form-control form-control-sm" onchange="this.form.submit()"></div>
+      <a class="btn btn-sm btn-outline-secondary" href="?month={{ next_month }}&employee={{ emp_filter }}&job_type={{ job_filter }}" aria-label="{% t 'Next month' %}"><i class="bi bi-chevron-right"></i></a>
+    </div>
+    <div class="col-6 col-md-3"><label class="form-label small mb-0" for="cal-emp">{% t "Employee" %}</label>
+      <select id="cal-emp" name="employee" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">{% t "All employees" %}</option>
+        {% for e in employees %}<option value="{{ e.pk }}" {% if e.pk|stringformat:'s' == emp_filter %}selected{% endif %}>{{ e.full_name }}</option>{% endfor %}
+      </select></div>
+    <div class="col-6 col-md-3"><label class="form-label small mb-0" for="cal-job">{% t "Job type" %}</label>
+      <select id="cal-job" name="job_type" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="">{% t "All" %}</option>
+        {% for j in job_types %}<option value="{{ j.pk }}" {% if j.pk|stringformat:'s' == job_filter %}selected{% endif %}>{{ j }}</option>{% endfor %}
+      </select></div>
+  </form>
+  <div class="d-flex flex-wrap gap-3 align-items-center mt-2 small cal-legend">
+    <strong>{{ month_label }}</strong>
+    {% for s, bg, fg in legend %}<span class="cal-key"><i style="background:{{ bg }}"></i>{{ s }}</span>{% endfor %}
+    <span class="cal-key"><i class="none"></i>{% t "Not marked" %}</span>
+  </div>
+</div></div>
+
+{% if not people %}
+  <div class="text-center text-muted py-5"><i class="bi bi-inbox fs-2 d-block"></i>{% t "No employees for this month." %}</div>
+{% endif %}
+
+<div class="cal-tiles{% if single %} single{% endif %}">
+{% for p in people %}
+  <section class="cal-tile" aria-label="{{ p.emp.full_name }} – {{ month_label }}">
+    <header class="cal-head">
+      <div class="cal-name">
+        {% if single %}<strong>{{ p.emp.full_name }}</strong>{% else %}<a href="?month={{ month_value }}&employee={{ p.emp.pk }}">{{ p.emp.full_name }}</a>{% endif %}
+        <span>{{ p.emp.employee_code }}{% if p.emp.job_type %} · {{ p.emp.job_type }}{% endif %}</span>
+      </div>
+      {% if p.rate is not None %}<div class="cal-rate" title="{% t 'Days present out of days marked' %}"><strong>{{ p.rate }}%</strong><span>{% t "present" %}</span></div>{% endif %}
+    </header>
+
+    <div class="cal-chips">
+      {% for s, bg, fg, n in p.chips %}<div class="cal-chip{% if not n %} zero{% endif %}"><i style="background:{{ bg }}"></i><span>{{ s }}</span><strong>{{ n }}</strong></div>{% endfor %}
+    </div>
+
+    <div class="cal-bar" aria-hidden="true">
+      {% for bg, pct, s, n in p.bar %}<i style="width:{{ pct|stringformat:'.2f' }}%;{% if bg %}background:{{ bg }}{% endif %}"{% if not bg %} class="none"{% endif %} title="{% if s %}{{ s }}{% else %}{% t 'Not marked' %}{% endif %}: {{ n }}"></i>{% endfor %}
+    </div>
+    <div class="cal-stats">
+      <span>{% t "Paid days" %} <strong>{{ p.paid|num }}</strong></span>
+      <span>{% t "Present" %} <strong>{{ p.present }}</strong>/{{ p.marked }}</span>
+      <span{% if p.missing %} class="warn"{% endif %}>{% t "Not marked" %} <strong>{{ p.missing }}</strong></span>
+    </div>
+
+    <div class="cal-week">{% for d in week_days %}<span>{{ d }}</span>{% endfor %}</div>
+    <div class="cal-days">
+      {% for week in p.weeks %}{% for c in week %}{% if c.in_month %}<a href="{% url 'estate:attendance_bulk' %}?date={{ c.day|date:'Y-m-d' }}" class="cal-c{% if c.status %} on{% elif c.missing %} none{% elif c.future %} future{% endif %}{% if c.day == today %} today{% endif %}"{% if c.status %} style="background:{{ c.bg }};color:{{ c.fg }}"{% endif %} title="{{ c.day|date:'d/m/y' }} – {% if c.status %}{{ c.status }}{% elif c.missing %}{% t 'Not marked' %}{% else %}{% t 'Not yet' %}{% endif %}">{{ c.day.day }}</a>{% else %}<span class="cal-c out"></span>{% endif %}{% endfor %}{% endfor %}
+    </div>
+  </section>
+{% endfor %}
+</div>
+{% endblock %}

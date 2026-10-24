@@ -1,0 +1,236 @@
+{% extends "base.html" %}{% load estate_tags core_tags static %}
+{% block title %}{% t "Report Builder" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1><i class="bi bi-funnel text-primary"></i> {% t "Report Builder" %}</h1>
+    <div class="text-muted small">{% t "Pick any data, any columns, any filters. Group by any field or period (day / week / month / quarter / year) and total it." %}</div></div>
+  <div class="dropdown no-print">
+    <button class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-lightning"></i> {% t "Ready-made reports" %}</button>
+    <ul class="dropdown-menu dropdown-menu-end" style="max-height:60vh;overflow:auto">
+      {% for name, slug, q in presets %}<li><a class="dropdown-item small" href="?ds={{ slug }}&{{ q }}&run=1">{{ name }}</a></li>{% endfor %}
+      {% if saved_reports %}<li><hr class="dropdown-divider"></li><li class="dropdown-header">{% t "Saved reports" %}</li>
+      {% for s in saved_reports %}<li><a class="dropdown-item small" href="{{ s.get_absolute_url }}"><i class="bi bi-bookmark"></i> {{ s.name }}</a></li>{% endfor %}{% endif %}
+    </ul>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-xl-4 no-print">
+    <form method="get" id="builderForm" class="card">
+      <div class="card-body">
+        <input type="hidden" name="run" value="1">
+        <label class="form-label small fw-semibold mb-1" for="b-ds">1. {% t "Data source" %}</label>
+        <select id="b-ds" name="ds" class="form-select form-select-sm mb-3" onchange="pmsGo('?ds='+this.value)">
+          {% for slug, d in datasets.items %}<option value="{{ slug }}" {% if slug == ds.slug %}selected{% endif %}>{{ d.title }}</option>{% endfor %}
+        </select>
+
+        <div class="form-label small fw-semibold mb-1">2. {% t "Filters" %}</div>
+        <div id="filters"></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="addFilter"><i class="bi bi-plus"></i> {% t "Add filter" %}</button>
+
+        <ul class="nav nav-tabs nav-fill small" role="tablist">
+          <li class="nav-item"><button type="button" class="nav-link {% if not params.group %}active{% endif %}" data-bs-toggle="tab" data-bs-target="#tabList" data-mode="list">3a. {% t "List rows" %}</button></li>
+          <li class="nav-item"><button type="button" class="nav-link {% if params.group %}active{% endif %}" data-bs-toggle="tab" data-bs-target="#tabGroup" data-mode="group">3b. {% t "Summarize / Group" %}</button></li>
+        </ul>
+        <div class="tab-content border border-top-0 rounded-bottom p-2 mb-3">
+          <div class="tab-pane fade {% if not params.group %}show active{% endif %}" id="tabList">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <input type="search" class="form-control form-control-sm me-2" placeholder="{% t 'Find field...' %}" id="colSearch" aria-label="{% t 'Find field...' %}">
+              <div class="btn-group btn-group-sm"><button type="button" class="btn btn-outline-secondary" data-cols="1">{% t "All" %}</button><button type="button" class="btn btn-outline-secondary" data-cols="0">{% t "None" %}</button></div>
+            </div>
+            <div class="builder-fields" id="colList">
+              {% for f in fields %}<div class="form-check" data-label="{{ f.label|lower }}">
+                <input class="form-check-input col-check" type="checkbox" name="cols" value="{{ f.path }}" id="c_{{ f.path }}" {% if f.path in params.cols %}checked{% endif %}>
+                <label class="form-check-label {% if f.is_fk_child %}text-muted{% endif %}" for="c_{{ f.path }}">{{ f.label }}</label></div>{% endfor %}
+            </div>
+            <label class="form-label small mt-2 mb-0" for="b-sort">{% t "Sort by" %}</label>
+            <select id="b-sort" name="sort" class="form-select form-select-sm list-only">
+              <option value="">{% t "Default" %}</option>
+              {% for f in fields %}<option value="{{ f.path }}" {% if params.sort == f.path %}selected{% endif %}>{{ f.label }} ↑</option><option value="-{{ f.path }}" {% if params.sort == '-'|add:f.path %}selected{% endif %}>{{ f.label }} ↓</option>{% endfor %}
+            </select>
+          </div>
+          <div class="tab-pane fade {% if params.group %}show active{% endif %}" id="tabGroup">
+            <label class="form-label small mb-0" for="b-g1">{% t "Group by (rows)" %}</label>
+            <select id="b-g1" name="group" class="form-select form-select-sm mb-2 group-only">
+              <option value="">— {% t "choose" %} —</option>
+              {% for f in fields %}{% if f.type != 'number' %}<option value="{{ f.path }}" {% if params.group.0 == f.path %}selected{% endif %}>{{ f.label }}</option>{% endif %}{% endfor %}
+            </select>
+            <label class="form-label small mb-0" for="b-g2">{% t "Then by (columns / series)" %} <span class="text-muted">{% t "optional" %}</span></label>
+            <select id="b-g2" name="group" class="form-select form-select-sm mb-2 group-only">
+              <option value="">— {% t "none" %} —</option>
+              {% for f in fields %}{% if f.type != 'number' %}<option value="{{ f.path }}" {% if params.group.1 == f.path %}selected{% endif %}>{{ f.label }}</option>{% endif %}{% endfor %}
+            </select>
+            <div class="row g-2 mb-2">
+              <div class="col-6"><label class="form-label small mb-0" for="b-per">{% t "Date grouping" %}</label>
+                <select id="b-per" name="period" class="form-select form-select-sm group-only">{% for k, v in periods %}<option value="{{ k }}" {% if params.period == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
+              <div class="col-6 d-flex align-items-end"><div class="form-check"><input class="form-check-input group-only" type="checkbox" name="pivot" value="1" id="pivot" {% if params.pivot %}checked{% endif %}><label class="form-check-label small" for="pivot">{% t "Cross-tab (pivot)" %}</label></div></div>
+            </div>
+            <div class="form-label small mb-0">{% t "Calculate" %}</div>
+            <div id="aggs"></div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mb-2" id="addAgg"><i class="bi bi-plus"></i> {% t "Add calculation" %}</button>
+            <div class="row g-2">
+              <div class="col-6"><label class="form-label small mb-0" for="b-gsort">{% t "Sort" %}</label>
+                <select id="b-gsort" name="sort" class="form-select form-select-sm group-only">
+                  <option value="">{% t "By group" %}</option><option value="-agg" {% if params.sort == '-agg' %}selected{% endif %}>{% t "1st calculation, high to low" %}</option><option value="agg" {% if params.sort == 'agg' %}selected{% endif %}>{% t "1st calculation, low to high" %}</option></select></div>
+              <div class="col-6"><label class="form-label small mb-0" for="b-chart">{% t "Chart" %}</label>
+                <select id="b-chart" name="chart" class="form-select form-select-sm group-only">
+                  <option value="bar" {% if params.chart == 'bar' %}selected{% endif %}>{% t "Bar" %}</option><option value="line" {% if params.chart == 'line' %}selected{% endif %}>{% t "Line" %}</option><option value="none" {% if params.chart == 'none' %}selected{% endif %}>{% t "No chart" %}</option></select></div>
+            </div>
+          </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <button class="btn btn-primary btn-sm"><i class="bi bi-play-fill"></i> {% t "Run report" %}</button>
+          <a href="?ds={{ ds.slug }}" class="btn btn-link btn-sm">{% t "Reset" %}</a>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="col-xl-8">
+    {% if result %}
+    <div class="card">
+      <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
+        <span>{{ ds.title }} · {% if result.grouped %}{% t "{n} groups" n=result.total_count %}{% else %}{% t "{n} records" n=result.total_count %}{% if result.shown < result.total_count %} ({% t "showing the first {n}; export for all" n=result.shown %}){% endif %}{% endif %}</span>
+        <div class="d-flex gap-1 no-print">
+          <a class="btn btn-sm btn-outline-secondary" href="?{{ querystring }}&export=csv"><i class="bi bi-filetype-csv"></i> {% t "Excel (CSV)" %}</a>
+          <a class="btn btn-sm btn-outline-secondary" href="?{{ querystring }}&export=pdf"><i class="bi bi-file-earmark-pdf"></i> PDF</a>
+          <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#saveModal"><i class="bi bi-bookmark-plus"></i> {% t "Save" %}</button>
+        </div>
+      </div>
+      {% if result.chart and params.chart != 'none' and result.rows %}
+      <div class="card-body border-bottom"><div class="chart-box"><canvas id="resultChart"></canvas></div></div>
+      {% endif %}
+      <div class="table-responsive table-scroll">
+      {% if result.pivot %}
+        <table class="table table-sm table-hover table-data mb-0">
+          <thead><tr><th>{{ result.pivot.corner }}</th>{% for c in result.pivot.cols %}<th class="num">{{ c }}</th>{% endfor %}<th class="num">{% t "Total" %}</th></tr></thead>
+          <tbody>{% for r in result.pivot.rows %}<tr>{% for v in r %}{% if forloop.first %}<td class="fw-semibold">{{ v }}</td>{% else %}<td class="num">{{ v|num }}</td>{% endif %}{% endfor %}</tr>{% endfor %}</tbody>
+          <tfoot><tr><td>{% t "Total" %}</td>{% for t in result.pivot.col_totals %}<td class="num">{{ t|num }}</td>{% endfor %}</tr></tfoot>
+        </table>
+        <div class="small text-muted p-2">{% t "Values" %}: {{ result.pivot.measure }}</div>
+      {% else %}
+        <table class="table table-sm table-hover table-data mb-0">
+          <thead><tr>{% for h in result.headers %}<th class="{% if result.numeric|get_index:forloop.counter0 %}num{% endif %}">{{ h }}</th>{% endfor %}</tr></thead>
+          <tbody>{% for r in result.rows %}<tr>{% for v in r %}{% if result.numeric|get_index:forloop.counter0 %}<td class="num">{{ v|num }}</td>{% else %}<td>{{ v }}</td>{% endif %}{% endfor %}</tr>
+          {% empty %}<tr><td colspan="{{ result.headers|length }}" class="text-center text-muted py-4">{% t "No matching data" %}</td></tr>{% endfor %}</tbody>
+          {% if result.rows %}<tfoot><tr>{% for t in result.totals %}<td class="num">{% if t is not None %}{{ t|num }}{% elif forloop.first %}{% t "Total" %}{% endif %}</td>{% endfor %}</tr></tfoot>{% endif %}
+        </table>
+      {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <div class="card"><div class="card-body text-center text-muted py-5">
+      <i class="bi bi-table fs-1 d-block mb-2"></i>
+      {% t "Choose a data source and filters, then pick columns (list) or a group-by field (summary) and press Run report. Or start from a ready-made report." %}
+    </div></div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="modal fade" id="saveModal" tabindex="-1"><div class="modal-dialog"><form method="post" action="{% url 'reports:save' %}" class="modal-content">{% csrf_token %}
+  <div class="modal-header"><h5 class="modal-title">{% t "Save this report" %}</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{% t 'Close' %}"></button></div>
+  <div class="modal-body">
+    <input type="hidden" name="qs" value="{{ querystring }}">
+    <label class="form-label small" for="sr-name">{% t "Name" %}</label><input id="sr-name" name="name" class="form-control mb-2" required>
+    <label class="form-label small" for="sr-desc">{% t "Description" %}</label><input id="sr-desc" name="description" class="form-control">
+  </div>
+  <div class="modal-footer"><button class="btn btn-primary">{% t "Save" %}</button></div>
+</form></div></div>
+{{ builder_data|json_script:"builder-data" }}
+{{ chart_data|json_script:"chart-data" }}
+<script id="builder-text" type="application/json">{"field": "{% filter escapejs %}{% t 'field' %}{% endfilter %}", "value": "{% filter escapejs %}{% t 'value' %}{% endfilter %}"}</script>
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'vendor/chartjs/chart.umd.min.js' %}"></script>
+<script src="{% static 'js/charts.js' %}?v={{ ASSET_V }}"></script>
+<script>
+(function () {
+  const B = JSON.parse(document.getElementById("builder-data").textContent);
+  const TXT = JSON.parse(document.getElementById("builder-text").textContent);
+  const BY = Object.fromEntries(B.fields.map((f) => [f.path, f]));
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const noValue = ["isnull", "notnull", "true", "false"];
+
+  function valueInput(f, op, name, val) {
+    if (!f || noValue.includes(op)) return `<input type="hidden" name="${name}" value="">`;
+    if (f.type === "date") {  // DD/MM/YY with the calendar pop-up (dates.js); old saved reports used 2026-10-13
+      const shown = window.pmsDate ? (window.pmsDate.fromISO(val) || val || "") : (val || "");
+      return `<input type="text" name="${name}" value="${esc(shown)}" class="form-control form-control-sm pms-date" placeholder="DD/MM/YY" autocomplete="off">`;
+    }
+    const type = f.type === "number" ? 'number" step="any' : "text";
+    return `<input type="${type}" name="${name}" value="${esc(val || "")}" class="form-control form-control-sm" placeholder="${esc(TXT.value)}">`;
+  }
+
+  function addFilter(init) {
+    init = init || {};
+    const row = document.createElement("div");
+    row.className = "border rounded p-2 mb-2 bg-light filter-row";
+    const opts = B.fields.map((f) => `<option value="${f.path}" ${f.path === init.field ? "selected" : ""}>${esc(f.label)}</option>`).join("");
+    row.innerHTML = `<div class="d-flex gap-1 mb-1"><select name="f_field" class="form-select form-select-sm f-field"><option value="">— ${esc(TXT.field)} —</option>${opts}</select>
+      <button type="button" class="btn btn-sm btn-outline-danger f-del"><i class="bi bi-x"></i></button></div>
+      <div class="d-flex gap-1"><select name="f_op" class="form-select form-select-sm f-op" style="max-width:45%"></select><div class="f-val flex-fill"></div><div class="f-val2 flex-fill"></div></div>`;
+    document.getElementById("filters").appendChild(row);
+    const fSel = row.querySelector(".f-field"), oSel = row.querySelector(".f-op");
+    const values = (keep) => {
+      const f = BY[fSel.value], op = oSel.value;
+      row.querySelector(".f-val").innerHTML = valueInput(f, op, "f_val", keep ? init.value : "");
+      row.querySelector(".f-val2").innerHTML = op === "between" ? valueInput(f, op, "f_val2", keep ? init.value2 : "") : '<input type="hidden" name="f_val2" value="">';
+    };
+    const render = (keep) => {
+      const f = BY[fSel.value], cur = keep ? init.op : oSel.value;
+      oSel.innerHTML = (f ? B.operators[f.type] : []).map((o) => `<option value="${o[0]}" ${o[0] === cur ? "selected" : ""}>${esc(o[1])}</option>`).join("");
+      values(keep);
+    };
+    fSel.onchange = () => render(false);
+    oSel.onchange = () => values(false);
+    row.querySelector(".f-del").onclick = () => row.remove();
+    render(true);
+  }
+
+  function addAgg(init) {
+    const [fn, path] = (init || "sum:").split(":");
+    const nums = B.fields.filter((f) => f.type === "number");
+    const row = document.createElement("div");
+    row.className = "d-flex gap-1 mb-1 agg-row";
+    row.innerHTML = `<select class="form-select form-select-sm a-fn" style="max-width:38%">${B.agg_funcs.map((a) => `<option value="${a[0]}" ${a[0] === fn ? "selected" : ""}>${esc(a[1])}</option>`).join("")}</select>
+      <select class="form-select form-select-sm a-field">${nums.map((f) => `<option value="${f.path}" ${f.path === path ? "selected" : ""}>${esc(f.label)}</option>`).join("")}</select>
+      <input type="hidden" name="aggs" class="group-only">
+      <button type="button" class="btn btn-sm btn-outline-danger"><i class="bi bi-x"></i></button>`;
+    document.getElementById("aggs").appendChild(row);
+    const sync = () => {
+      const f = row.querySelector(".a-fn").value;
+      row.querySelector(".a-field").hidden = f === "count";
+      row.querySelector("input[name=aggs]").value = f === "count" ? "count" : f + ":" + row.querySelector(".a-field").value;
+    };
+    row.querySelectorAll("select").forEach((s) => { s.onchange = sync; });
+    row.querySelector("button").onclick = () => row.remove();
+    sync();
+  }
+
+  let mode = B.mode;
+  document.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => { mode = b.dataset.mode; }));
+  document.getElementById("builderForm").addEventListener("submit", () => {
+    // send only the inputs of the active tab
+    document.querySelectorAll(mode === "list" ? ".group-only" : ".list-only, .col-check").forEach((e) => { e.disabled = true; });
+  });
+  document.getElementById("colSearch").addEventListener("input", (e) => {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll("#colList .form-check").forEach((d) => { d.hidden = !d.dataset.label.includes(q); });
+  });
+  document.querySelectorAll("[data-cols]").forEach((b) => b.addEventListener("click", () => {
+    document.querySelectorAll("#colList .form-check").forEach((d) => { if (!d.hidden) d.querySelector("input").checked = b.dataset.cols === "1"; });
+  }));
+  document.getElementById("addFilter").addEventListener("click", () => addFilter());
+  document.getElementById("addAgg").addEventListener("click", () => addAgg());
+  B.filters.forEach((f) => addFilter(f));
+  (B.aggs.length ? B.aggs : ["count"]).forEach((a) => addAgg(a));
+
+  const chart = JSON.parse(document.getElementById("chart-data").textContent);
+  const el = document.getElementById("resultChart");
+  if (chart && el) {
+    if ("{{ params.chart|escapejs }}" === "line") PMSCharts.line(el, chart.labels, chart.series);
+    else PMSCharts.bar(el, chart.labels, chart.stacked ? chart.series : chart.series.slice(0, 1), { stacked: !!chart.stacked });
+  }
+})();
+</script>
+{% endblock %}

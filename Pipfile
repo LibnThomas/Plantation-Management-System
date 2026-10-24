@@ -1,0 +1,17 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+django = ">=5.1,<5.3"
+psycopg = {extras = ["binary"], version = ">=3.1"}
+fpdf2 = ">=2.8,<2.9"
+uharfbuzz = ">=0.40"
+pillow = ">=10"
+cryptography = ">=42"
+segno = ">=1.6"
+gunicorn = {version = ">=22.0", markers = "sys_platform != 'win32'"}
+
+[dev-packages]
+ruff = "*"

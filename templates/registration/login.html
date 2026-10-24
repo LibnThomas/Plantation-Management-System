@@ -1,0 +1,29 @@
+{% extends "base.html" %}{% load core_tags %}
+{% block title %}{% t "Login" %}{% endblock %}
+{% block auth_content %}
+<div class="login-wrap">
+  <div class="card shadow-lg" style="width:100%;max-width:380px">
+    <div class="card-body p-4">
+      <div class="text-center mb-3">
+        {% if APP.logo_type %}<img src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="" style="max-height:64px;max-width:200px">{% else %}<i class="bi bi-flower3 text-primary" style="font-size:2.5rem"></i>{% endif %}
+        <h5 class="mt-2 mb-0">{% t "Plantation Management System" %}</h5>
+        <div class="text-muted small">{{ ESTATE_NAME }}</div>
+      </div>
+      {% if form.errors %}<div class="alert alert-danger py-2 small">{% for e in form.non_field_errors.as_data %}{% if e.code == "plan_limit" %}{{ e.message }}{% else %}{% t "Invalid username or password." %}{% endif %}{% empty %}{% t "Invalid username or password." %}{% endfor %}</div>{% endif %}
+      {% if MOBILE_FIRST_LOGIN %}{% with first=MOBILE_FIRST_LOGIN %}<div class="alert alert-info py-2 small"><i class="bi bi-info-circle"></i> {% t "First time on this phone - username: {user}, password: {password}. Change the password after logging in (user menu > Change password)." user=first.user password=first.password %}</div>{% endwith %}{% endif %}
+      <form method="post">{% csrf_token %}
+        <div class="mb-3"><label class="form-label small" for="u">{% t "Username" %}</label>
+          <input id="u" name="username" class="form-control" autofocus autocapitalize="none" autocomplete="username" required></div>
+        <div class="mb-3"><label class="form-label small" for="pw">{% t "Password" %}</label>
+          <input id="pw" type="password" name="password" class="form-control" autocomplete="current-password" required></div>
+        <input type="hidden" name="next" value="{{ next }}">
+        <button class="btn btn-primary w-100">{% t "Login" %}</button>
+      </form>
+      <form method="post" action="{% url 'core:set_language' %}" class="mt-3 text-center">{% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        {% for code, name in LANGUAGES_UI %}<button name="language" value="{{ code }}" class="btn btn-sm {% if code == CURRENT_LANG %}btn-success{% else %}btn-link{% endif %}">{{ name }}</button>{% endfor %}
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

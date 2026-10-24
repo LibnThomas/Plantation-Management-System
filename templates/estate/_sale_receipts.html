@@ -1,0 +1,21 @@
+{% load core_tags estate_tags %}<div class="salary-history">
+  <div class="row g-2 mb-2 text-center small">
+    <div class="col-6 col-md-3"><div class="sh-box"><span>{% t "Total amount" %}</span><strong>{{ CURRENCY }} {{ sale.total_amount|inr }}</strong></div></div>
+    <div class="col-6 col-md-3"><div class="sh-box"><span>{% t "Received" %} ({{ sale.received_percent|floatformat:0 }} %)</span><strong class="text-success">{{ CURRENCY }} {{ sale.amount_received|inr }}</strong></div></div>
+    <div class="col-6 col-md-3"><div class="sh-box {% if sale.balance > 0 %}pending{% endif %}"><span>{% t "Balance (to receive)" %}</span><strong>{{ CURRENCY }} {{ sale.balance|inr }}</strong></div></div>
+    <div class="col-6 col-md-3"><div class="sh-box"><span>{% t "Payment received date (last)" %}</span><strong>{{ sale.last_received_on|date:"d/m/y"|default:"–" }}</strong></div></div>
+  </div>
+  <div class="progress mb-3" style="height:8px" title="{{ sale.received_percent|floatformat:0 }} %"><div class="progress-bar bg-success" style="width:{{ sale.received_percent|stringformat:'s' }}%"></div></div>
+  <div class="table-responsive"><table class="table table-sm align-middle mb-2 sh-table" data-table-tools="off">
+    <thead><tr><th>#</th><th>{% t "Payment received date" %}</th><th class="num">{% t "Amount received" %}</th><th class="num">%</th><th>{% t "Payment mode" %}</th><th class="num">{% t "Balance after this payment" %}</th><th>{% t "Remarks" %}</th></tr></thead>
+    <tbody>
+      <tr class="text-muted"><td></td><td colspan="4">{% t "Sold date" %} {{ sale.date|date:"d/m/y" }} · {% t "Total amount" %}</td><td class="num">{{ sale.total_amount|inr }}</td><td></td></tr>
+      {% for r in receipts %}<tr>
+        <td>{{ forloop.counter }}</td>
+        <td><a href="{% url 'estate:update' 'sale-receipts' r.pk %}">{{ r.date|date:"d/m/y" }}</a></td>
+        <td class="num">{{ r.amount|inr }}</td><td class="num">{{ r.percent|floatformat:0 }}</td><td>{{ r.payment_mode|default:"" }}</td>
+        <td class="num">{{ r.balance_after|inr }}</td><td class="small">{{ r.remarks }}</td>
+      </tr>{% empty %}<tr><td colspan="7" class="text-muted small">{% t "Nothing received yet." %}</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>

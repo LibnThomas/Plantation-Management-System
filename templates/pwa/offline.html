@@ -1,0 +1,16 @@
+{% load core_tags %}<!doctype html>
+<html lang="{{ CURRENT_LANG }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% t "You are offline" %}</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif;
+         background: #f4f6f4; color: #1d2b22; text-align: center; padding: 24px; box-sizing: border-box; }
+  .box { max-width: 360px; } h1 { font-size: 1.3rem; margin: 16px 0 8px; } p { color: #5f6f65; line-height: 1.5; }
+  button { margin-top: 12px; border: 0; border-radius: 8px; padding: 12px 22px; font-size: 1rem; background: #1f5f3f; color: #fff; }
+  img { width: 72px; height: 72px; border-radius: 16px; }
+</style></head>
+<body><div class="box">
+  <img src="/static/icons/icon-192.png" alt="">
+  <h1>{% t "You are offline" %}</h1>
+  <p>{% t "The estate server can't be reached. Check the Wi-Fi or mobile data and try again. Nothing you saved is lost." %}</p>
+  <button onclick="location.reload()">{% t "Try again" %}</button>
+</div></body></html>

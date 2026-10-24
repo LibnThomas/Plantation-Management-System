@@ -1,0 +1,29 @@
+{% load core_tags estate_tags %}<div class="salary-history">
+  <div class="row g-2 mb-3 text-center small">
+    <div class="col-6 col-md-3"><div class="sh-box"><span>{% t "Net payable" %}</span><strong>{{ CURRENCY }} {{ p.net_amount|inr }}</strong></div></div>
+    <div class="col-6 col-md-3"><div class="sh-box"><span>{% t "Paid" %}</span><strong class="text-success">{{ CURRENCY }} {{ p.amount_paid|inr }}</strong></div></div>
+    {% if p.carried_amount %}<div class="col-6 col-md-3"><div class="sh-box"><span>{% t "Moved to a later payroll" %}</span><strong>{{ CURRENCY }} {{ p.carried_amount|inr }}</strong></div></div>{% endif %}
+    {% if pending_entries %}<div class="col-6 col-md-3"><div class="sh-box pending"><span>{% t "Pending entries (not paid)" %}</span><strong>{{ CURRENCY }} {{ pending_entries|inr }}</strong></div></div>{% endif %}
+    <div class="col-6 col-md-3"><div class="sh-box {% if p.balance > 0 %}pending{% endif %}"><span>{% t "Balance (pending)" %}</span><strong>{{ CURRENCY }} {{ p.balance|inr }}</strong></div></div>
+  </div>
+
+  {% if carried_from %}<div class="small mb-2"><i class="bi bi-arrow-down-right-circle text-primary"></i> {% t "Includes pending salary from earlier payroll:" %}
+    {% for o in carried_from %}<a href="{% url 'estate:payslip' o.pk %}" class="ms-1">{{ o.period_from|date:"d/m/y" }} – {{ o.period_to|date:"d/m/y" }} ({{ CURRENCY }} {{ o.carried_amount|inr }})</a>{% if not forloop.last %},{% endif %}{% endfor %}</div>{% endif %}
+
+  <div class="table-responsive"><table class="table table-sm align-middle mb-2 sh-table" data-table-tools="off">
+    <thead><tr><th>#</th><th>{% t "Date" %}</th><th class="num">{% t "Amount" %}</th><th>{% t "Payment status" %}</th><th>{% t "Payment mode" %}</th><th class="num">{% t "Balance after this payment" %}</th><th>{% t "Remarks" %}</th></tr></thead>
+    <tbody>
+      <tr class="text-muted"><td></td><td colspan="4">{% t "Net payable" %} ({{ p.period_from|date:"d/m/y" }} – {{ p.period_to|date:"d/m/y" }})</td><td class="num">{{ p.net_amount|inr }}</td><td></td></tr>
+      {% for pay in payments %}<tr class="{% if current and pay.pk == current.pk %}{% if pay.is_paid %}table-success{% else %}table-warning{% endif %} fw-semibold{% elif not pay.is_paid %}sh-pending{% endif %}">
+        <td>{{ forloop.counter }}</td>
+        <td><a href="{% url 'estate:salary_paid' pay.pk %}">{{ pay.date|date:"d/m/y" }}</a>{% if current and pay.pk == current.pk %} <span class="badge text-bg-primary">{% t "This payment" %}</span>{% endif %}</td>
+        <td class="num">{% if pay.is_paid %}{{ pay.amount|inr }}{% else %}<s class="text-muted">{{ pay.amount|inr }}</s>{% endif %}</td>
+        <td>{% include "estate/_pay_entry_status.html" %}</td><td>{{ pay.payment_mode|default:"" }}</td>
+        <td class="num">{{ pay.balance_after|inr }}</td><td class="small">{{ pay.remarks }}</td>
+      </tr>{% empty %}<tr><td colspan="7" class="text-muted small">{% t "Nothing paid yet." %}</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+
+  {% if p.carried_to_id %}<div class="small"><i class="bi bi-arrow-right-circle text-primary"></i> {% t "The balance of {amount} was added to a later payroll:" amount=p.carried_amount|inr %}
+    <a href="{% url 'estate:payslip' p.carried_to_id %}">{{ p.carried_to.period_from|date:"d/m/y" }} – {{ p.carried_to.period_to|date:"d/m/y" }}</a></div>{% endif %}
+</div>

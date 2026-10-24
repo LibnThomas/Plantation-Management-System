@@ -1,0 +1,250 @@
+{% extends "base.html" %}{% load core_tags estate_tags %}
+{% block title %}{% t "App Settings" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1><i class="bi bi-sliders text-primary"></i> {% t "App Settings" %}</h1>
+    <div class="text-muted small">{% t "Only administrators can see this page. Changes apply to everyone." %}</div></div>
+</div>
+
+<ul class="nav nav-tabs mb-3 flex-nowrap overflow-auto">
+  {% for key, icon, label in tab_list %}
+  <li class="nav-item"><a class="nav-link text-nowrap {% if tab == key %}active{% endif %}" href="?tab={{ key }}"><i class="bi {{ icon }}"></i> {{ label }}</a></li>
+  {% endfor %}
+</ul>
+
+{% if tab == "general" %}
+{% with form=forms.general %}
+<form method="post" enctype="multipart/form-data" class="card"><div class="card-body">{% csrf_token %}
+  <input type="hidden" name="tab" value="general">
+  <div class="row g-3">
+    {% for name in "estate_name currency_symbol phone email"|split %}{% with f=form|field:name %}
+    <div class="col-md-6">{% include "core/_field.html" %}</div>{% endwith %}{% endfor %}
+    {% with f=form.address %}<div class="col-12">{% include "core/_field.html" %}</div>{% endwith %}
+    <div class="col-md-6">
+      {% with f=form.logo_file %}{% include "core/_field.html" %}{% endwith %}
+      {% if app.logo_type %}<div class="d-flex align-items-center gap-3 mt-2">
+        <img src="{% url 'core:logo' %}?v={{ app.updated_at|date:'U' }}" alt="" style="max-height:48px;max-width:160px" class="border rounded p-1 bg-white">
+        <div class="form-check">{{ form.remove_logo }} <label class="form-check-label small" for="{{ form.remove_logo.id_for_label }}">{{ form.remove_logo.label }}</label></div>
+      </div>{% endif %}
+    </div>
+    <div class="col-12"><hr class="my-1"><div class="small text-muted fw-semibold">{% t "Reports and numbering" %}</div></div>
+    {% for name in "financial_year_start_month crop_season_start_month employee_code_prefix batch_no_prefix work_hours_per_day"|split %}{% with f=form|field:name %}
+    <div class="col-6 col-md-3">{% include "core/_field.html" %}</div>{% endwith %}{% endfor %}
+  </div>
+</div><div class="card-footer bg-white"><button class="btn btn-primary"><i class="bi bi-check2"></i> {% t "Save" %}</button></div></form>
+{% endwith %}
+
+{% elif tab == "theme" %}
+{% with form=forms.theme %}
+<div class="row g-3">
+  <div class="col-lg-7">
+  <form method="post" class="card" id="theme-form"><div class="card-body">{% csrf_token %}
+    <input type="hidden" name="tab" value="theme">
+    <div class="small fw-semibold mb-2">{% t "Ready-made themes" %}</div>
+    <div class="row g-2 mb-3">
+      {% for p in presets %}
+      <div class="col-6 col-md-4"><button type="button" class="btn btn-light w-100 preset-btn {% if app.theme_preset_id == p.pk %}active{% endif %}"
+        data-id="{{ p.pk }}" data-primary="{{ p.primary_color }}" data-header="{{ p.header_color }}" data-bg="{{ p.background_color }}">
+        <span class="swatch" style="background:{{ p.header_color }}"></span><span class="swatch" style="background:{{ p.primary_color }}"></span><span class="swatch" style="background:{{ p.background_color }}"></span>
+        <span class="small ms-1">{{ p }}</span></button></div>
+      {% endfor %}
+    </div>
+    <div class="d-none">{{ form.theme_preset }}</div>
+    <div class="row g-3">
+      {% for name in "primary_color header_color background_color"|split %}{% with f=form|field:name %}
+      <div class="col-4">{% include "core/_field.html" %}</div>{% endwith %}{% endfor %}
+      {% with f=form.font %}<div class="col-md-8">{% include "core/_field.html" %}</div>{% endwith %}
+      {% with f=form.base_font_size %}<div class="col-md-4">{% include "core/_field.html" %}</div>{% endwith %}
+    </div>
+    <div class="small text-muted mt-3">{% t "Each user can still make the text bigger for themselves from the user menu (Text size)." %}</div>
+  </div><div class="card-footer bg-white d-flex gap-2">
+    <button class="btn btn-primary"><i class="bi bi-check2"></i> {% t "Save" %}</button>
+    <button type="button" class="btn btn-outline-secondary" id="theme-reset">{% t "Undo changes" %}</button>
+  </div></form>
+  </div>
+  <div class="col-lg-5">
+    <div class="card"><div class="card-header">{% t "Preview" %}</div><div class="card-body" id="theme-preview">
+      <div class="rounded p-3" data-preview="bg" style="background:{{ app.background_color }}">
+        <div class="rounded-top px-3 py-2 text-white fw-semibold" data-preview="head" style="background:{{ app.header_color }}"><i class="bi bi-flower3"></i> {{ ESTATE_NAME }}</div>
+        <div class="bg-white rounded-bottom p-3" data-preview="font">
+          <div class="fw-semibold mb-2">{% t "Dashboard" %}</div>
+          <p class="small mb-2">{% t "Workers today" %}: <strong>22 / 24</strong></p>
+          <span class="btn btn-sm text-white" data-preview="primary" style="background:{{ app.primary_color }}">{% t "Save" %}</span>
+          <span class="btn btn-sm" data-preview="outline" style="color:{{ app.primary_color }};border-color:{{ app.primary_color }}">{% t "Cancel" %}</span>
+        </div>
+      </div>
+    </div></div>
+  </div>
+</div>
+{% endwith %}
+
+{% elif tab == "subscription" %}
+{% with s=status sf=forms.subscription %}
+<div class="row g-3">
+  <div class="col-lg-5"><div class="card h-100"><div class="card-body">
+    <div class="d-flex justify-content-between align-items-start mb-3">
+      <h5 class="mb-0">{% if s.is_trial %}{% t "Free trial" %}{% elif s.plan %}{{ s.plan }}{% else %}{% t "Subscription" %}{% endif %}</h5>
+      <span class="badge {% if s.state == 'active' or s.state == 'trial' %}text-bg-success{% elif s.state == 'expiring' %}text-bg-warning{% else %}text-bg-danger{% endif %}">{{ state_label }}</span>
+    </div>
+    <table class="table table-sm mb-3">
+      <tr><th class="fw-normal text-muted">{% t "Valid till" %}</th><td class="fw-semibold">{{ s.valid_until|date:"d/m/y" }}{% if s.days_left >= 0 %} <span class="text-muted small fw-normal">({% t "{n} days left" n=s.days_left %})</span>{% endif %}</td></tr>
+      <tr><th class="fw-normal text-muted">{% t "Updated by" %}</th><td>{% if app.sub_api_enabled or not manual_allowed %}<i class="bi bi-cloud-check"></i> {% t "API (automatic)" %}{% elif app.sub_valid_until %}<i class="bi bi-person-gear"></i> {% t "Administrator (manual)" %}{% else %}{% t "Free trial" %}{% endif %}</td></tr>
+      <tr><th class="fw-normal text-muted">{% t "Read-only from" %}</th><td>{{ s.read_only_from|date:"d/m/y" }}</td></tr>
+      <tr><th class="fw-normal text-muted">{% t "Users" %}</th><td>{{ users_used }}{% if s.max_users %} / {{ s.max_users }}{% else %} · {% t "no limit" %}{% endif %} <span class="text-muted small">({% t "administrators not counted" %})</span></td></tr>
+      <tr><th class="fw-normal text-muted">{% t "Installation ID" %}</th><td><code class="fs-6">{{ app.install_id }}</code></td></tr>
+      {% if app.sub_api_checked_at %}<tr><th class="fw-normal text-muted">{% t "Last API check" %}</th><td>{{ app.sub_api_checked_at|date:"d/m/y H:i" }}<div class="small {% if app.sub_api_ok_at == app.sub_api_checked_at %}text-success{% else %}text-danger{% endif %}">{{ app.sub_api_message }}</div>
+        {% if app.sub_api_ok_at and app.sub_api_ok_at != app.sub_api_checked_at %}<div class="small text-muted">{% t "Last success" %}: {{ app.sub_api_ok_at|date:"d/m/y H:i" }}</div>{% endif %}</td></tr>{% endif %}
+      {% if s.support %}<tr><th class="fw-normal text-muted">{% t "Support / renewal" %}</th><td>{{ s.support }}</td></tr>{% endif %}
+    </table>
+    <div class="small text-muted">{% t "Before the end date a reminder is shown to everyone. After it there are a few days of grace, then the app becomes read-only until renewal. No data is ever deleted." %}</div>
+  </div></div></div>
+
+  <div class="col-lg-7">
+  <form method="post" class="card mb-3" id="sub-form">{% csrf_token %}<input type="hidden" name="tab" value="subscription"><div class="card-body">
+    {% if not manual_allowed %}<div class="alert alert-info small py-2">{% t "On this installation the valid till date is managed by your supplier through the API." %}</div>{% endif %}
+    <div class="form-check form-switch mb-3">
+      {{ sf.sub_api_enabled }} <label class="form-check-label fw-semibold" for="{{ sf.sub_api_enabled.id_for_label }}">{{ sf.sub_api_enabled.label }}</label>
+      <div class="form-text">{{ sf.sub_api_enabled.help_text }}</div>
+    </div>
+    <div class="row g-3" data-mode="manual">
+      <div class="col-sm-6">{% with f=sf.sub_valid_until %}{% include "core/_field.html" %}{% endwith %}</div>
+      <div class="col-sm-6">{% with f=sf.sub_max_users %}{% include "core/_field.html" %}{% endwith %}</div>
+    </div>
+    <div class="row g-3" data-mode="api">
+      <div class="col-12">{% with f=sf.sub_api_url %}{% include "core/_field.html" %}{% endwith %}</div>
+      <div class="col-md-6">{% with f=sf.sub_api_token %}{% include "core/_field.html" %}{% endwith %}{% if app.sub_api_token %}<div class="small text-success"><i class="bi bi-check2"></i> {% t "A token is saved." %}</div>{% endif %}</div>
+      <div class="col-md-3 col-6">{% with f=sf.sub_api_field %}{% include "core/_field.html" %}{% endwith %}</div>
+      <div class="col-md-3 col-6">{% with f=sf.sub_api_interval_hours %}{% include "core/_field.html" %}{% endwith %}</div>
+      <div class="col-12"><details class="small"><summary class="text-muted">{% t "What the API must return" %}</summary>
+        <pre class="bg-light p-2 rounded mt-2 mb-1">GET &lt;API URL&gt;?install_id={{ app.install_id }}&amp;estate=…
+Authorization: Bearer &lt;token&gt;
+
+{"valid_until": "2027-03-31", "max_users": 10, "plan": "Standard"}</pre>
+        {% t "Only the date is required; it can also be plain text such as 2027-03-31. A simple JSON file on any web server is enough." %}</details></div>
+    </div>
+  </div>
+  {% if manual_allowed %}<div class="card-footer bg-white d-flex flex-wrap gap-2">
+    <button class="btn btn-primary" name="action" value="save"><i class="bi bi-check2"></i> {% t "Save" %}</button>
+    <button class="btn btn-outline-primary" name="action" value="check" data-mode="api" formnovalidate><i class="bi bi-arrow-repeat"></i> {% t "Check now" %}</button>
+  </div>{% else %}<div class="card-footer bg-white"><button class="btn btn-outline-primary" name="action" value="check" formnovalidate><i class="bi bi-arrow-repeat"></i> {% t "Check now" %}</button></div>{% endif %}
+  </form>
+
+  {% if manual_allowed %}<form method="post" class="card" data-mode="manual">{% csrf_token %}<input type="hidden" name="tab" value="subscription"><div class="card-body">
+    <div class="small text-muted mb-2">{% t "Or paste a licence key from your supplier: it fills the valid till date and the number of users for you." %}</div>
+    {% with f=forms.licence.licence_key %}{% include "core/_field.html" %}{% endwith %}
+  </div><div class="card-footer bg-white"><button class="btn btn-outline-primary" name="action" value="licence"><i class="bi bi-key"></i> {% t "Save licence key" %}</button></div></form>{% endif %}
+  </div>
+</div>
+{% endwith %}
+
+{% elif tab == "security" %}
+<div class="row g-3">
+  <div class="col-lg-6"><form method="post" class="card h-100">{% csrf_token %}<div class="card-body">
+    <input type="hidden" name="tab" value="security">
+    <h6>{% t "Automatic logout" %}</h6>
+    {% with f=forms.security.session_timeout_minutes %}{% include "core/_field.html" %}{% endwith %}
+    <div class="small text-muted">{% t "Useful on shared phones and office computers." %}</div>
+  </div><div class="card-footer bg-white"><button class="btn btn-primary"><i class="bi bi-check2"></i> {% t "Save" %}</button></div></form></div>
+  <div class="col-lg-6"><div class="card h-100"><div class="card-body">
+    <h6>{% t "Backup" %}</h6>
+    <p class="small text-muted">{% t "Download all your records, settings, labels and users (not the demo data) as one file. Keep it somewhere safe, e.g. once a week." %}</p>
+    <a class="btn btn-outline-primary" href="{% url 'core:backup' %}"><i class="bi bi-download"></i> {% t "Download backup" %}</a>
+    <hr>
+    <h6>{% t "Users and permissions" %}</h6>
+    <p class="small text-muted mb-2">{% t "Administrators: everything, including this page. Staff: can also change drop-down lists, job types, wages and labels. Other users: daily entries, reports and exports." %}</p>
+    <a class="btn btn-outline-secondary" href="{% url 'admin:auth_user_changelist' %}"><i class="bi bi-people"></i> {% t "Manage users" %}</a>
+  </div></div></div>
+</div>
+
+{% elif tab == "activity" %}
+<div class="card mb-3"><div class="card-body py-2">
+  <form method="get" class="row g-2 align-items-end"><input type="hidden" name="tab" value="activity">
+    <div class="col-12 col-md-4"><label class="form-label small mb-0" for="aq">{% t "Search" %}</label>
+      <input id="aq" type="search" name="q" value="{{ request.GET.q }}" class="form-control form-control-sm"></div>
+    <div class="col-6 col-md-3"><label class="form-label small mb-0" for="au">{% t "User" %}</label>
+      <select id="au" name="user" class="form-select form-select-sm"><option value="">{% t "All" %}</option>
+        {% for u in log_users %}<option value="{{ u.pk }}" {% if request.GET.user == u.pk|stringformat:"d" %}selected{% endif %}>{{ u.username }}</option>{% endfor %}</select></div>
+    <div class="col-6 col-md-3"><label class="form-label small mb-0" for="aa">{% t "Action" %}</label>
+      <select id="aa" name="action" class="form-select form-select-sm"><option value="">{% t "All" %}</option>
+        {% for code, label in action_labels.items %}<option value="{{ code }}" {% if request.GET.action == code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="col-12 col-md-auto"><button class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> {% t "Filter" %}</button></div>
+  </form>
+</div></div>
+<div class="card"><div class="table-responsive"><table class="table table-sm table-data mb-0">
+  <thead><tr><th>{% t "When" %}</th><th>{% t "User" %}</th><th>{% t "Action" %}</th><th>{% t "Record type" %}</th><th>{% t "Record" %}</th></tr></thead>
+  <tbody>{% for log in logs %}<tr><td class="text-nowrap">{{ log.at|date:"d/m/y H:i" }}</td><td>{{ log.user.username|default:"–" }}</td>
+    <td><span class="badge {% if log.action == 'delete' %}text-bg-danger{% elif log.action == 'add' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ action_labels|get_item:log.action }}</span></td>
+    <td>{{ log.model }}</td><td>{{ log.summary }}</td></tr>
+  {% empty %}<tr><td colspan="5" class="text-center text-muted py-4">{% t "Nothing recorded yet." %}</td></tr>{% endfor %}</tbody>
+</table></div>
+{% if logs.has_other_pages %}<div class="card-footer bg-white d-flex justify-content-between small">
+  <span>{% t "{n} records" n=logs.paginator.count %}</span>
+  <span>{% if logs.has_previous %}<a href="?{% qs_replace page=logs.previous_page_number %}">‹ {% t "Previous" %}</a>{% endif %}
+    {{ logs.number }} / {{ logs.paginator.num_pages }}
+    {% if logs.has_next %}<a href="?{% qs_replace page=logs.next_page_number %}">{% t "Next" %} ›</a>{% endif %}</span>
+</div>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if tab == "subscription" %}
+<script>
+(function () {
+  // API on: show the API fields and lock the date (the API fills it). API off: the administrator types the date.
+  const toggle = document.getElementById("id_sub_api_enabled");
+  if (!toggle) return;
+  const locked = toggle.disabled;
+  function show() {
+    const api = locked || toggle.checked;
+    document.querySelectorAll('[data-mode="api"]').forEach((el) => el.classList.toggle("d-none", !api));
+    document.querySelectorAll('[data-mode="manual"]').forEach((el) => {
+      // read-only (still sent with the form) rather than disabled; the server ignores them while the API is on
+      el.querySelectorAll("input, textarea").forEach((i) => { if (!locked) i.readOnly = api; });
+      el.querySelectorAll("button").forEach((i) => { if (!locked) i.disabled = api; });
+      el.classList.toggle("opacity-50", api);
+    });
+  }
+  toggle.addEventListener("change", show);
+  show();
+})();
+</script>
+{% endif %}
+{% if tab == "theme" %}
+{{ font_stacks|json_script:"font-stacks" }}
+<script>
+(function () {
+  const form = document.getElementById("theme-form");
+  const $ = (name) => form.querySelector(`[name="${name}"]`);
+  const preview = (sel) => document.querySelector(`[data-preview="${sel}"]`);
+  const fonts = JSON.parse(document.getElementById("font-stacks").textContent);
+  const start = { primary: $("primary_color").value, header: $("header_color").value, bg: $("background_color").value,
+                  preset: $("theme_preset").value, font: $("font").value, size: $("base_font_size").value };
+  function paint() {
+    const p = $("primary_color").value;
+    preview("bg").style.background = $("background_color").value;
+    preview("head").style.background = $("header_color").value;
+    preview("primary").style.background = p;
+    preview("outline").style.color = p; preview("outline").style.borderColor = p;
+    preview("font").style.fontFamily = fonts[$("font").value] || "";
+    preview("font").style.fontSize = ($("base_font_size").value || 15) + "px";
+  }
+  form.querySelectorAll(".preset-btn").forEach((btn) => btn.addEventListener("click", () => {
+    $("primary_color").value = btn.dataset.primary; $("header_color").value = btn.dataset.header;
+    $("background_color").value = btn.dataset.bg; $("theme_preset").value = btn.dataset.id;
+    form.querySelectorAll(".preset-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    paint();
+  }));
+  ["primary_color", "header_color", "background_color"].forEach((n) => $(n).addEventListener("input", () => {
+    $("theme_preset").value = ""; form.querySelectorAll(".preset-btn").forEach((b) => b.classList.remove("active")); paint();
+  }));
+  ["font", "base_font_size"].forEach((n) => $(n).addEventListener("input", paint));
+  document.getElementById("theme-reset").addEventListener("click", () => {
+    $("primary_color").value = start.primary; $("header_color").value = start.header; $("background_color").value = start.bg;
+    $("theme_preset").value = start.preset; $("font").value = start.font; $("base_font_size").value = start.size; paint();
+  });
+  paint();
+})();
+</script>
+{% endif %}
+{% endblock %}

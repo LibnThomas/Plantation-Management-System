@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>OK</title></head><body>
+{{ payload|json_script:"payload" }}
+<script>
+  // tell the page that opened this pop-up about the new record; it adds and selects it
+  const payload = JSON.parse(document.getElementById("payload").textContent);
+  // the opener only accepts messages from its own pop-up frame (checked there), so "*" is fine; the
+  // in-browser demo's frames have no origin to name
+  const target = window.location.origin && window.location.origin !== "null" ? window.location.origin : "*";
+  if (window.parent && window.parent !== window) window.parent.postMessage(payload, target);
+</script>
+</body></html>

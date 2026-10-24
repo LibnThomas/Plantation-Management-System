@@ -1,0 +1,7 @@
+{% load core_tags %}<div>
+  {% if f.field.widget.input_type == "checkbox" %}<div class="form-check">{{ f }} <label class="form-check-label" for="{{ f.id_for_label }}">{{ f.label }}</label></div>
+  {% else %}<label class="form-label small fw-semibold mb-1" for="{{ f.id_for_label }}">{{ f.label }}{% if f.field.required %} *{% endif %}</label>
+  {{ f }}{% endif %}
+  {% if f.help_text %}<div class="form-text">{{ f.help_text }}</div>{% endif %}
+  {% for e in f.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+</div>

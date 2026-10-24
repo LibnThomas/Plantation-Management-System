@@ -1,0 +1,56 @@
+{% extends "base.html" %}{% load estate_tags core_tags %}
+{% block title %}{% t "Salary slip" %}{% endblock %}
+{% block content %}
+<div class="page-head no-print">
+  <h1>{% t "Salary slip" %}</h1>
+  <div class="d-flex gap-2">
+    <a href="{% url 'estate:payslip_pdf' p.pk %}" class="btn btn-sm btn-primary"><i class="bi bi-file-earmark-pdf"></i> PDF</a>
+    <button onclick="window.print()" class="btn btn-sm btn-outline-secondary"><i class="bi bi-printer"></i> {% t "Print" %}</button>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'estate:update' 'salary-payments' p.pk %}"><i class="bi bi-pencil"></i> {% t "Edit / pay" %}</a>
+  </div>
+</div>
+<div class="card mx-auto" style="max-width:760px"><div class="card-body p-4">
+  <div class="d-flex justify-content-between border-bottom pb-2 mb-3 gap-3">
+    <div><h5 class="mb-0">{{ ESTATE_NAME }}</h5><div class="small text-muted">{% t "Salary slip" %}</div></div>
+    <div class="text-end small">{% t "Period" %}<br><strong>{{ p.period_from|date:"d/m/y" }} – {{ p.period_to|date:"d/m/y" }}</strong></div>
+  </div>
+  <div class="row small mb-3">
+    {% if p.is_labour_count %}
+    <div class="col-6"><span class="text-muted">{% t "Gang leader / Paid to" %}:</span> <strong>{{ p.payee_name }}</strong>{% if p.gang_leader.phone %}<br><span class="text-muted">{% t "Phone" %}:</span> {{ p.gang_leader.phone }}{% endif %}</div>
+    <div class="col-6 text-end"><span class="badge text-bg-info"><i class="bi bi-people"></i> {% t "Daily labour count" %}</span><br><span class="text-muted">{% t "Work" %}:</span> {% for l in lines %}{{ l.job }}{% if not forloop.last %}, {% endif %}{% endfor %}</div>
+    {% else %}
+    <div class="col-6"><span class="text-muted">{% t "Employee" %}:</span> <strong>{{ p.employee.full_name }}</strong><br><span class="text-muted">{% t "Code" %}:</span> {{ p.employee.employee_code }}</div>
+    <div class="col-6 text-end"><span class="text-muted">{% t "Job" %}:</span> {{ p.employee.job_type }}<br><span class="text-muted">{% t "Type" %}:</span> {{ p.employee.employment_type }}</div>
+    {% endif %}
+  </div>
+  <div class="row g-3">
+    <div class="col-md-6"><table class="table table-sm">
+      <thead><tr><th colspan="2">{% t "Earnings" %}</th></tr></thead>
+      {% if p.is_labour_count %}<tr><td>{% t "Man-days (workers × days)" %}</td><td class="text-end">{{ p.days_worked|num }}</td></tr>
+      {% else %}<tr><td>{% t "Days worked ({full} full + {half} half)" full=p.full_days|num half=p.half_days|num %}</td><td class="text-end">{{ p.days_worked|num }}</td></tr>{% endif %}
+      {% for l in lines %}<tr class="small"><td>{{ l.days|num }}{% if l.entries %} <span class="text-muted">({% t "{n} days" n=l.entries %})</span>{% endif %} × {{ l.rate|inr }} <span class="text-muted">· {{ l.label }}</span></td><td class="text-end">{{ l.basic|inr }}</td></tr>{% empty %}
+      <tr><td>{% t "Daily rate" %}</td><td class="text-end">{{ p.daily_rate|inr }}</td></tr>{% endfor %}
+      <tr><td>{% t "Basic amount" %}</td><td class="text-end">{{ p.basic_amount|inr }}</td></tr>
+      {% for l in lines %}{% if l.ot_hours|num != "0" %}<tr class="small"><td>{% t "OT" %} {{ l.ot_hours|num }} h × {{ l.ot_rate|inr }} <span class="text-muted">· {{ l.label }}</span></td><td class="text-end">{{ l.ot_amount|inr }}</td></tr>{% endif %}{% endfor %}
+      <tr><td>{% t "Overtime" %} ({{ p.ot_hours|num }} h)</td><td class="text-end">{{ p.ot_amount|inr }}</td></tr>
+      <tr><td>{% t "Bonus / Incentive" %}</td><td class="text-end">{{ p.bonus|inr }}</td></tr>
+      {% if p.previous_pending %}<tr><td>{% t "Previous pending (added)" %}</td><td class="text-end">{{ p.previous_pending|inr }}</td></tr>{% endif %}
+      <tr class="fw-bold"><td>{% t "Gross" %}</td><td class="text-end">{{ p.gross_amount|inr }}</td></tr>
+    </table></div>
+    <div class="col-md-6"><table class="table table-sm">
+      <thead><tr><th colspan="2">{% t "Deductions" %}</th></tr></thead>
+      <tr><td>{% t "Advance" %}</td><td class="text-end">{{ p.advance_deduction|inr }}</td></tr>
+      <tr><td>{% t "Other (PF/ESI etc.)" %}</td><td class="text-end">{{ p.other_deduction|inr }}</td></tr>
+      {% if not p.is_labour_count %}<tr><td>{% t "Leave days" %}</td><td class="text-end">{{ p.leave_days|num }}</td></tr>{% endif %}
+    </table>
+    <div class="p-3 bg-leaf rounded text-center"><div class="small text-muted">{% t "Net payable" %}</div><div class="fs-3 fw-bold">{{ CURRENCY }} {{ p.net_amount|inr }}</div>
+      <div class="small">{{ p.get_pay_state_display|tr_ui }} · {{ p.status }}</div>
+      {% if p.amount_paid %}<div class="small">{% t "Paid" %} {{ p.amount_paid|inr }}{% if p.balance > 0 %} · <span class="text-danger fw-semibold">{% t "Pending" %} {{ p.balance|inr }}</span>{% endif %}</div>{% endif %}</div>
+    </div>
+  </div>
+  <h2 class="h6 mt-4"><i class="bi bi-clock-history text-primary"></i> {% t "Payments" %}</h2>
+  {% include "estate/_salary_history.html" %}
+  {% if can_pay %}<div class="no-print mt-2"><a class="btn btn-sm btn-primary" href="{% url 'estate:update' 'salary-payments' p.pk %}#id_current_payment"><i class="bi bi-cash-coin"></i> {% t "Pay / record a payment" %}</a></div>{% endif %}
+  <div class="d-flex justify-content-between mt-5 small"><span>{% t "Employer signature" %}</span><span>{% if p.is_labour_count %}{% t "Gang leader signature" %}{% else %}{% t "Employee signature" %}{% endif %}</span></div>
+</div></div>
+{% endblock %}

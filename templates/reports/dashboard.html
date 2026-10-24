@@ -1,0 +1,88 @@
+{% extends "base.html" %}{% load estate_tags core_tags static %}
+{% block title %}{% t "Dashboard" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>{% t "Dashboard" %}</h1><div class="text-muted small">{{ today|date:"l, d/m/y" }} · {% t "Crop season from" %} {{ season_start|date:"M Y" }} · {% t "FY from" %} {{ fy_start|date:"M Y" }}</div></div>
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{% url 'estate:attendance_bulk' %}" class="btn btn-sm btn-primary"><i class="bi bi-calendar-check"></i> {% t "Attendance" %}</a>
+    <a href="{% url 'estate:create' 'group-work' %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-people"></i> {% t "Daily work" %}</a>
+    <a href="{% url 'estate:create' 'harvests' %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-basket"></i> {% t "Harvest" %}</a>
+    <a href="{% url 'estate:create' 'field-operations' %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-droplet-half"></i> {% t "Fertilizer / Spray" %}</a>
+    <a href="{% url 'estate:create' 'processing' %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-fire"></i> {% t "Processing" %}</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3"><div class="kpi d-flex justify-content-between">
+    <div><div class="label">{% t "Workers today" %}</div><div class="value">{{ working_today }}<small class="fs-6 text-muted"> / {{ active_employees }}</small></div>
+      <div class="sub">{% for s, n in att_summary %}{% if n %}{{ s }} {{ n }}{% if not forloop.last %} · {% endif %}{% endif %}{% endfor %}{% if not att_marked %}<a href="{% url 'estate:attendance_bulk' %}">{% t "not marked yet" %}</a>{% endif %}</div></div>
+    <i class="bi bi-people icon"></i></div></div>
+  <div class="col-6 col-lg-3"><div class="kpi d-flex justify-content-between">
+    <div><div class="label">{% t "Cost this month" %}</div><div class="value">{{ CURRENCY }}{{ month_cost|inr:0 }}</div><div class="sub">{% t "Labour" %} {{ CURRENCY }}{{ labour_month_total|inr:0 }}</div></div>
+    <i class="bi bi-cash-coin icon"></i></div></div>
+  <div class="col-6 col-lg-3"><div class="kpi d-flex justify-content-between">
+    <div><div class="label">{% t "Harvest this season" %}</div>
+      {% if season_harvest %}{% with h=season_harvest.0 %}<div class="value">{{ h.q|num }} <small class="fs-6">{{ h.product.unit|default:"" }}</small></div>
+      <div class="sub">{{ h.product }}{% for x in season_harvest|slice:"1:3" %} · {{ x.product }} {{ x.q|num }}{% endfor %}</div>{% endwith %}
+      {% else %}<div class="value">0</div><div class="sub">{% t "No harvest recorded" %}</div>{% endif %}</div>
+    <i class="bi bi-basket icon"></i></div></div>
+  <div class="col-6 col-lg-3"><div class="kpi d-flex justify-content-between">
+    <div><div class="label">{% t "Sales this FY" %}</div><div class="value">{{ CURRENCY }}{{ fy_sales|inr:0 }}</div><div class="sub">{% t "Cost this FY" %} {{ CURRENCY }}{{ fy_cost|inr:0 }}</div></div>
+    <i class="bi bi-graph-up-arrow icon"></i></div></div>
+</div>
+{% if pending_salary.n %}
+<div class="alert alert-warning d-flex flex-wrap align-items-center gap-2 py-2">
+  <i class="bi bi-hourglass-split"></i> {% t "Pending salaries" %}: <strong>{{ CURRENCY }} {{ pending_salary.total|inr }}</strong>
+  <span class="text-muted small">({% t "{n} payrolls not fully paid" n=pending_salary.n %})</span>
+  <a class="ms-auto" href="{% url 'estate:list' 'salary-payments' %}?pay_state=pending">{% t "View" %}</a>
+</div>
+{% endif %}
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-7"><div class="card h-100"><div class="card-header">{% t "Harvest by month (last 12 months, raw quantity)" %}</div>
+    <div class="card-body"><div class="chart-box"><canvas id="prodChart"></canvas></div></div></div></div>
+  <div class="col-lg-5"><div class="card h-100"><div class="card-header">{% t "Labour cost by work type (this FY)" %}</div>
+    <div class="card-body"><div class="chart-box"><canvas id="labourChart"></canvas></div>
+    {% if not charts.labour.labels %}<div class="text-muted small text-center">{% t "No labour data yet" %}</div>{% endif %}</div></div></div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-7"><div class="card h-100"><div class="card-header">{% t "Where the money goes (last 12 months)" %}</div>
+    <div class="card-body"><div class="chart-box"><canvas id="costChart"></canvas></div></div></div></div>
+  <div class="col-lg-5"><div class="card h-100"><div class="card-header">{% t "Processed output this season" %}</div>
+    <div class="table-responsive"><table class="table table-sm table-data mb-0">
+      <thead><tr><th>{% t "Product" %}</th><th class="num">{% t "Input" %}</th><th class="num">{% t "Output" %}</th><th class="num">{% t "Recovery" %}</th></tr></thead>
+      <tbody>{% for p in season_processed %}<tr><td>{{ p.product }}</td><td class="num">{{ p.i|num }}</td><td class="num">{{ p.o|num }}</td>
+        <td class="num">{% if p.i %}{% widthratio p.o p.i 100 %}%{% endif %}</td></tr>
+      {% empty %}<tr><td colspan="4" class="text-center text-muted">{% t "No processing recorded this season" %}</td></tr>{% endfor %}</tbody>
+    </table></div></div></div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header d-flex justify-content-between"><span><i class="bi bi-alarm"></i> {% t "Field work due (next 3 weeks)" %}</span><a href="{% url 'estate:list' 'field-operations' %}" class="small">{% t "All" %}</a></div>
+    <ul class="list-group list-group-flush small">
+      {% for o in due %}<li class="list-group-item d-flex justify-content-between gap-2">
+        <span><strong>{{ o.operation_type }}</strong> · {% if o.block %}{{ o.block }}{% else %}{% t "All blocks" %}{% endif %}{% if o.agri_input %} · {{ o.agri_input.name }}{% endif %}</span>
+        <span class="text-nowrap {% if o.next_due_date < today %}text-danger fw-semibold{% endif %}">{{ o.next_due_date|date:"d/m/y" }}{% if o.next_due_date < today %} ({% t "overdue" %}){% endif %}</span></li>
+      {% empty %}<li class="list-group-item text-muted">{% t "Nothing due. Set 'Next due date' when recording fertilizer / spray rounds." %}</li>{% endfor %}
+    </ul></div></div>
+  <div class="col-lg-6"><div class="card h-100"><div class="card-header">{% t "Recent fertilizer & field work" %}</div>
+    <ul class="list-group list-group-flush small">
+      {% for o in recent_ops %}<li class="list-group-item d-flex justify-content-between gap-2">
+        <span>{{ o.date|date:"d/m/y" }} · <strong>{{ o.operation_type }}</strong>{% if o.block %} · {{ o.block }}{% endif %}{% if o.agri_input %} · {{ o.agri_input.name }} {{ o.quantity|num }} {{ o.agri_input.unit|default:"" }}{% endif %}</span>
+        <span class="text-muted text-nowrap">{{ CURRENCY }}{{ o.total_cost|inr:0 }}</span></li>
+      {% empty %}<li class="list-group-item text-muted">{% t "No field work recorded yet." %}</li>{% endfor %}
+    </ul></div></div>
+</div>
+{{ charts|json_script:"chart-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'vendor/chartjs/chart.umd.min.js' %}"></script>
+<script src="{% static 'js/charts.js' %}?v={{ ASSET_V }}"></script>
+<script>
+const C = JSON.parse(document.getElementById("chart-data").textContent);
+PMSCharts.bar(document.getElementById("prodChart"), C.prod.labels, C.prod.series, {stacked: true});
+PMSCharts.bar(document.getElementById("costChart"), C.cost.labels, C.cost.series, {stacked: true});
+if (C.labour.labels.length) PMSCharts.ranking(document.getElementById("labourChart"), C.labour.labels, C.labour.data, "{% filter escapejs %}{% t 'Labour cost' %}{% endfilter %}");
+</script>
+{% endblock %}

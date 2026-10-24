@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% load estate_tags core_tags %}
+{% block title %}{{ emp.full_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1><i class="bi bi-person-badge text-primary"></i> {{ emp.full_name }}</h1>
+    <div class="text-muted small">{{ emp.employee_code }} · {{ emp.job_type }} · {{ emp.employment_type }} · {% if emp.is_active %}<span class="text-success">{% t "Active" %}</span>{% else %}{% t "Inactive" %}{% endif %}</div></div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-primary" href="{% url 'estate:create' 'work-entries' %}?employee={{ emp.pk }}&job_type={{ emp.job_type_id }}"><i class="bi bi-plus"></i> {% t "Work entry" %}</a>
+    <a class="btn btn-sm btn-primary" href="{% url 'estate:update' 'employees' emp.pk %}"><i class="bi bi-pencil"></i> {% t "Edit" %}</a>
+  </div>
+</div>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3"><div class="kpi"><div class="label">{% t "Daily wage today" %}</div><div class="value">{{ CURRENCY }}{{ wage_today|inr }}</div><div class="sub">{% t "OT" %} {{ CURRENCY }}{{ ot_today|inr }}/h · {% t "from the job type" %}</div></div></div>
+  <div class="col-6 col-md-3"><div class="kpi"><div class="label">{% t "Attendance" %} {{ year }}</div>
+    <div class="sub mt-1">{% for s, n in summary %}<span class="badge me-1 mb-1" style="background:{{ s.color }}">{{ s }} {{ n }}</span>{% endfor %}</div></div></div>
+  <div class="col-6 col-md-3"><div class="kpi"><div class="label">{% t "OT hours" %} {{ year }}</div><div class="value">{{ ot|num }}</div></div></div>
+  <div class="col-6 col-md-3"><div class="kpi"><div class="label">{% t "Salary paid" %} {{ year }}</div><div class="value">{{ CURRENCY }}{{ paid_total|inr:0 }}</div><div class="sub">{% t "Joined" %} {{ emp.date_of_joining|date:"d/m/y" }}</div></div></div>
+</div>
+<div class="row g-3">
+  <div class="col-lg-6"><div class="card"><div class="card-header">{% t "Recent attendance" %}</div>
+    <div class="table-responsive"><table class="table table-sm table-data mb-0"><thead><tr><th>{% t "Date" %}</th><th>{% t "Status" %}</th><th>{% t "Work" %}</th><th class="num">{% t "OT" %}</th></tr></thead>
+    <tbody>{% for a in recent_att %}<tr><td>{{ a.date|date:"d/m/y" }}</td><td>{{ a.status }}</td><td>{{ a.job_type|default:"" }}</td><td class="num">{{ a.ot_hours|num }}</td></tr>
+    {% empty %}<tr><td colspan="4" class="text-muted text-center">{% t "No attendance this year" %}</td></tr>{% endfor %}</tbody></table></div></div></div>
+  <div class="col-lg-6"><div class="card mb-3"><div class="card-header">{% t "Salary payments" %}</div>
+    <div class="table-responsive"><table class="table table-sm table-data mb-0"><thead><tr><th>{% t "Period" %}</th><th class="num">{% t "Days" %}</th><th class="num">{% t "Net" %}</th><th>{% t "Status" %}</th><th></th></tr></thead>
+    <tbody>{% for p in pays %}<tr><td>{{ p.period_from|date:"d/m/y" }} – {{ p.period_to|date:"d/m/y" }}</td><td class="num">{{ p.days_worked|num }}</td><td class="num">{{ p.net_amount|inr }}</td><td>{{ p.status }}</td><td><a href="{% url 'estate:payslip' p.pk %}" aria-label="{% t 'Payslip' %}"><i class="bi bi-file-earmark-text"></i></a></td></tr>
+    {% empty %}<tr><td colspan="5" class="text-muted text-center">{% t "No payments" %}</td></tr>{% endfor %}</tbody></table></div></div>
+    <div class="card"><div class="card-header">{% t "Recent work entries" %}</div>
+    <div class="table-responsive"><table class="table table-sm table-data mb-0"><thead><tr><th>{% t "Date" %}</th><th>{% t "Work" %}</th><th>{% t "Block" %}</th><th class="num">{% t "Total" %}</th></tr></thead>
+    <tbody>{% for w in works %}<tr><td>{{ w.date|date:"d/m/y" }}</td><td>{{ w.job_type }}</td><td>{{ w.block|default:"" }}</td><td class="num">{{ w.total_amount|inr }}</td></tr>
+    {% empty %}<tr><td colspan="4" class="text-muted text-center">{% t "No work entries" %}</td></tr>{% endfor %}</tbody></table></div></div>
+  </div>
+</div>
+{% endblock %}

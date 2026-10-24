@@ -1,0 +1,6 @@
+{% load estate_tags core_tags %}<details class="px-3 pb-3"><summary class="small text-muted">{% t "Table view" %}</summary>
+  <div class="table-responsive table-scroll"><table class="table table-sm table-data mt-2">
+    <thead><tr><th>{% t "Period" %}</th>{% for n in block.names %}<th class="num">{{ n }}</th>{% endfor %}<th class="num">{% t "Total" %}</th></tr></thead>
+    <tbody>{% for r in block.table %}<tr>{% for c in r %}{% if forloop.first %}<td>{{ c }}</td>{% else %}<td class="num">{{ c|num }}</td>{% endif %}{% endfor %}</tr>{% endfor %}</tbody>
+    <tfoot><tr><td>{% t "Total" %}</td>{% for t in block.totals %}<td class="num">{{ t|num }}</td>{% endfor %}</tr></tfoot>
+  </table></div></details>

@@ -1,0 +1,28 @@
+{% extends "base.html" %}{% load core_tags %}
+{% block title %}{% t "Demo mode" %}{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1><i class="bi bi-easel text-primary"></i> {% t "Demo mode" %}</h1>
+  <div class="text-muted small">{% t "Show the application with realistic sample data, then come back to your own data." %}</div></div></div>
+<div class="row g-3">
+  <div class="col-lg-7"><div class="card h-100"><div class="card-body">
+    <h5 class="mb-3">{% if DEMO_MODE %}<span class="badge text-bg-warning">{% t "Demo mode is ON" %}</span>{% else %}<span class="badge text-bg-success">{% t "You are using your own data" %}</span>{% endif %}</h5>
+    <ul class="small mb-4">
+      <li>{% t "Sample data is kept in a separate demo database. Your own records are never changed or deleted." %}</li>
+      <li>{% t "Demo mode applies only to your login session; other users keep working with the real data." %}</li>
+      <li>{% t "Anything you add while in demo mode stays in the demo data." %}</li>
+      <li>{% t "Labels, translations and users are shared by both." %}</li>
+    </ul>
+    <div class="d-flex flex-wrap gap-2">
+      <form method="post">{% csrf_token %}
+        {% if DEMO_MODE %}<input type="hidden" name="action" value="disable"><button class="btn btn-success"><i class="bi bi-box-arrow-left"></i> {% t "Back to my data" %}</button>
+        {% else %}<input type="hidden" name="action" value="enable"><button class="btn btn-warning"><i class="bi bi-play-circle"></i> {% t "Switch to demo" %}</button>{% endif %}
+      </form>
+      {% if user.is_staff %}
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="regenerate">
+        <button class="btn btn-outline-secondary"><i class="bi bi-arrow-repeat"></i> {% t "Create fresh sample data" %}</button></form>
+      {% endif %}
+    </div>
+    {% if not demo_ready %}<div class="small text-muted mt-3">{% t "The first switch creates about 18 months of sample data; it can take up to a minute." %}</div>{% endif %}
+  </div></div></div>
+</div>
+{% endblock %}

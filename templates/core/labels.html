@@ -1,0 +1,57 @@
+{% extends "base.html" %}{% load estate_tags core_tags %}
+{% block title %}{% t "Labels & translations" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1><i class="bi bi-translate text-primary"></i> {% t "Labels & translations" %}</h1>
+    <div class="text-muted small">{% t "Rename any field, menu item or button, and edit its Malayalam, Hindi and Tamil text. Changes apply immediately for everyone." %}</div></div>
+  <div class="d-flex flex-wrap gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'core:labels_export' %}"><i class="bi bi-download"></i> {% t "Export CSV" %}</a>
+    <form method="post" action="{% url 'core:labels_import' %}" enctype="multipart/form-data" class="d-flex gap-1">{% csrf_token %}
+      <input type="file" name="file" accept=".csv" class="form-control form-control-sm" style="max-width:210px" aria-label="{% t 'CSV file' %}">
+      <button class="btn btn-sm btn-outline-primary"><i class="bi bi-upload"></i> {% t "Import CSV" %}</button>
+    </form>
+  </div>
+</div>
+<div class="card mb-3"><div class="card-body py-2">
+  <form method="get" class="row g-2 align-items-end">
+    <div class="col-12 col-md-4"><label class="form-label small mb-0" for="lq">{% t "Search" %}</label>
+      <input id="lq" type="search" name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="{% t 'Text in any language' %}"></div>
+    <div class="col-8 col-md-3"><label class="form-label small mb-0" for="lg">{% t "Group" %}</label>
+      <select id="lg" name="group" class="form-select form-select-sm"><option value="">{% t "All" %}</option>
+        {% for g in groups %}<option value="{{ g }}" {% if g == group %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></div>
+    <div class="col-4 col-md-auto"><div class="form-check"><input class="form-check-input" type="checkbox" name="missing" value="1" id="lm" {% if request.GET.missing %}checked{% endif %}><label class="form-check-label small" for="lm">{% t "Missing translations" %}</label></div></div>
+    <div class="col-12 col-md-auto"><button class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> {% t "Filter" %}</button></div>
+  </form>
+</div></div>
+<form method="post">{% csrf_token %}
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>{% t "{n} labels" n=page.paginator.count %}</span>
+    <button class="btn btn-sm btn-primary"><i class="bi bi-check2"></i> {% t "Save changes" %}</button>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm labels-table mb-0">
+      <thead><tr><th>{% t "Original" %}</th>{% for code, name in languages %}<th>{{ name }}</th>{% endfor %}<th>{% t "Reset" %}</th></tr></thead>
+      <tbody>
+      {% for lbl in page %}
+        <tr>
+          <td><input type="hidden" name="ids" value="{{ lbl.pk }}"><div class="small fw-semibold">{{ lbl.default }}</div><div class="key">{{ lbl.group }} · {{ lbl.key }}</div></td>
+          {% for code, name in languages %}<td><textarea name="{{ code }}_{{ lbl.pk }}" rows="2" class="form-control form-control-sm" aria-label="{{ name }}">{{ lbl|get_attr:code }}</textarea></td>{% endfor %}
+          <td class="text-center"><input class="form-check-input" type="checkbox" name="reset_{{ lbl.pk }}" value="1" title="{% t 'Restore the original English text' %}" aria-label="{% t 'Reset' %}"></td>
+        </tr>
+      {% empty %}<tr><td colspan="6" class="text-center text-muted py-4">{% t "No labels found." %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <button class="btn btn-sm btn-primary"><i class="bi bi-check2"></i> {% t "Save changes" %}</button>
+    {% if page.paginator.num_pages > 1 %}
+    <ul class="pagination pagination-sm mb-0">
+      {% if page.has_previous %}<li class="page-item"><a class="page-link" href="?{% qs_replace page=page.previous_page_number %}">{% t "Previous" %}</a></li>{% endif %}
+      <li class="page-item disabled"><span class="page-link">{% t "Page {n} of {total}" n=page.number total=page.paginator.num_pages %}</span></li>
+      {% if page.has_next %}<li class="page-item"><a class="page-link" href="?{% qs_replace page=page.next_page_number %}">{% t "Next" %}</a></li>{% endif %}
+    </ul>{% endif %}
+  </div>
+</div>
+</form>
+{% endblock %}

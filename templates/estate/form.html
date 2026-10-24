@@ -1,0 +1,650 @@
+{% extends "base.html" %}{% load estate_tags core_tags %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1><i class="bi {{ cfg.icon }} text-primary"></i> {% if instance %}{% t "Edit" %}{% else %}{% t "Add" %}{% endif %}: {{ record_name }}</h1>
+  <div class="d-flex flex-wrap gap-2">
+    {% if cfg.slug == 'salary-paid' and instance %}
+    <a href="{% url 'estate:update' 'salary-payments' instance.salary_id %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-wallet2"></i> {% t "Open payroll" %}</a>
+    <a href="{% url 'estate:payslip' instance.salary_id %}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-file-earmark-text"></i> {% t "Payslip" %}</a>
+    <a href="{% url 'estate:salary_paid' instance.pk %}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-clock-history"></i> {% t "Payment history" %}</a>
+    {% elif cfg.slug == 'sale-receipts' and instance %}
+    <a href="{% url 'estate:update' 'sales' instance.sale_id %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-graph-up-arrow"></i> {% t "Open sale" %}</a>
+    {% elif cfg.slug == 'salary-payments' and instance %}
+    <a href="{% url 'estate:payslip' instance.pk %}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-file-earmark-text"></i> {% t "Payslip" %}</a>
+    {% endif %}
+    <a href="{% url 'estate:list' cfg.slug %}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i> {% t "Back to list" %}</a>
+  </div>
+</div>
+<div class="row">
+  <div class="{% if history %}col-12{% else %}col-xl-9{% endif %}">
+    <div class="card">
+      <div class="card-body">
+        <form method="post" novalidate id="mainForm"{% if popup %} action="?popup=1"{% endif %}>
+          {% csrf_token %}
+          {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+          <div class="row g-3">
+          {% for field in form %}
+            {% if field.field.widget.input_type == 'checkbox' %}
+              <div class="col-12 col-md-6 d-flex align-items-end">
+                <div class="form-check form-switch">{{ field }} <label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label></div>
+              </div>
+            {% else %}
+              <div class="{% if field.field.widget.attrs.rows %}col-12{% else %}col-12 col-md-6 col-lg-4{% endif %}">
+                <label class="form-label small fw-semibold mb-1" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="text-danger">*</span>{% endif %}</label>
+                {{ field }}
+                {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                {% for e in field.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+              </div>
+            {% endif %}
+          {% endfor %}
+          </div>
+          {% if history %}
+          <div class="mt-4" id="wageHistory">
+            <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-2">
+              <div>
+                <h2 class="h6 mb-0"><i class="bi bi-clock-history text-primary"></i> {% t "Wage history" %}</h2>
+                <div class="form-text mt-0">{% t "Which daily wage and OT rate was paid from which date to which date. Entries use the rate in force on their own date. Leave 'Date to' empty for the current rate; it closes automatically when you add a newer one." %}</div>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-primary" id="addRate"><i class="bi bi-plus"></i> {% t "Add wage period" %}</button>
+            </div>
+            {{ history.management_form }}
+            {% for e in history.non_form_errors %}<div class="alert alert-danger py-2 small">{{ e }}</div>{% endfor %}
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0 wage-table">
+                <thead><tr>
+                  {% for name in "effective_from effective_to rate ot_rate_per_hour employment_type remarks"|split %}{% with f=history.empty_form|field:name %}<th>{{ f.label }}{% if f.field.required %} *{% endif %}</th>{% endwith %}{% endfor %}
+                  <th class="text-center">{% t "Remove" %}</th>
+                </tr></thead>
+                <tbody id="rateRows">
+                {% for f in history %}
+                  <tr>
+                    {% for name in "effective_from effective_to rate ot_rate_per_hour employment_type remarks"|split %}
+                      {% with fld=f|field:name %}<td>{{ fld }}{% for e in fld.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}</td>{% endwith %}
+                    {% endfor %}
+                    <td class="text-center">{% for hf in f.hidden_fields %}{{ hf }}{% endfor %}{% if f.instance.pk %}{{ f.DELETE }}{% else %}<span class="text-muted small">{% t "new" %}</span>{% endif %}</td>
+                  </tr>
+                  {% if f.non_field_errors %}<tr><td colspan="7"><div class="text-danger small">{{ f.non_field_errors|join:" " }}</div></td></tr>{% endif %}
+                {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <template id="rateTemplate">
+              <tr>
+                {% for name in "effective_from effective_to rate ot_rate_per_hour employment_type remarks"|split %}<td>{{ history.empty_form|field:name }}</td>{% endfor %}
+                <td class="text-center">{% for hf in history.empty_form.hidden_fields %}{{ hf }}{% endfor %}<span class="text-muted small">{% t "new" %}</span></td>
+              </tr>
+            </template>
+          </div>
+          {% endif %}
+          {% if p and salary_live %}
+          <div class="mt-4">
+            <h2 class="h6"><i class="bi bi-clock-history text-primary"></i> {% t "Payments" %}</h2>
+            {% include "estate/_salary_history.html" %}
+          </div>
+          {% endif %}
+          {% if sale and sale_live %}
+          <div class="mt-4">
+            <h2 class="h6"><i class="bi bi-clock-history text-primary"></i> {% t "Payments received" %}</h2>
+            {% include "estate/_sale_receipts.html" %}
+          </div>
+          {% endif %}
+          {% if cfg.slug == 'harvests' %}
+          <div class="harvest-preview border rounded p-3 mt-3 bg-light" id="harvestPreview" aria-live="polite">
+            <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-2">
+              <h2 class="h6 mb-0"><i class="bi bi-calculator text-primary"></i> {% t "Harvest per person (worked out automatically)" %}</h2>
+              <span class="small text-muted" data-hp="job"></span>
+            </div>
+            <div class="small text-muted mb-2" data-hp="status">{% t "Choose the date, product and job, and enter the quantity." %}</div>
+            <div class="row g-0 column-gap-4 small" data-hp="rows" hidden>
+              <div class="col-md">
+              <div class="d-flex justify-content-between gap-3 border-bottom py-1"><span class="text-muted">{% t "People - Work Details (individual)" %}</span><strong class="text-nowrap" data-hp="ind">–</strong></div>
+              <div class="d-flex justify-content-between gap-3 border-bottom py-1"><span class="text-muted">{% t "People - Daily Labour Count" %}</span><strong class="text-nowrap" data-hp="count">–</strong></div>
+              <div class="d-flex justify-content-between gap-3 border-bottom py-1"><span class="text-muted">{% t "OT hours (individual + labour count)" %}</span><strong class="text-nowrap" data-hp="ot">–</strong></div>
+              <div class="d-flex justify-content-between gap-3 border-bottom py-1"><span class="text-muted">{% t "Total hours worked" %}</span><strong class="text-nowrap" data-hp="hours">–</strong></div>
+              <div class="d-flex justify-content-between gap-3 border-bottom py-1"><span class="text-muted">{% t "Day's harvest" %}</span><strong class="text-end" data-hp="qty">–</strong></div>
+              </div>
+              <div class="col-md">
+              <div class="d-flex justify-content-between gap-3 border-bottom py-1"><span class="text-muted">{% t "Harvest per hour" %}</span><strong class="text-nowrap" data-hp="per_hour">–</strong></div>
+              <div class="d-flex justify-content-between gap-3 border-bottom py-1"><span class="text-muted">{% t "1 person - full day" %}</span><strong class="text-nowrap" data-hp="full_day">–</strong></div>
+              <div class="d-flex justify-content-between gap-3 border-bottom py-1"><span class="text-muted">{% t "1 person - OT" %}</span><strong class="text-nowrap" data-hp="person_ot">–</strong></div>
+              <div class="d-flex justify-content-between gap-3 border-bottom py-1"><span class="text-muted">{% t "1 person - full day + OT" %}</span><strong class="text-nowrap" data-hp="full_day_ot">–</strong></div>
+              <div class="d-flex justify-content-between gap-3 border-bottom py-1"><span class="text-muted">{% t "1 person - average (all people)" %}</span><strong class="text-nowrap" data-hp="average">–</strong></div>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+          <hr>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary"><i class="bi bi-check2"></i> {% t "Save" %}</button>
+            {% if popup %}
+            <button type="button" class="btn btn-link" onclick="window.parent.postMessage({type: 'pms-cancel'}, location.origin && location.origin !== 'null' ? location.origin : '*')">{% t "Cancel" %}</button>
+            {% else %}
+            <button class="btn btn-outline-primary" name="save_add" value="1"><i class="bi bi-plus"></i> {% t "Save & add another" %}</button>
+            <a href="{% url 'estate:list' cfg.slug %}" class="btn btn-link">{% t "Cancel" %}</a>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-3 mt-3 mt-xl-0{% if history %} d-none{% endif %}">
+    {% if computed %}
+    <div class="card mb-3"><div class="card-header"><i class="bi bi-calculator"></i> {% t "Calculated values" %}</div>
+      <ul class="list-group list-group-flush small">
+        {% for label, v in computed %}<li class="list-group-item d-flex justify-content-between gap-2"><span class="text-muted">{{ label }}</span><strong class="text-nowrap">{{ v }}</strong></li>{% endfor %}
+      </ul>
+    </div>{% endif %}
+    {% if salary_live %}
+    <div class="card mb-3 salary-live" id="salaryLive"><div class="card-header"><i class="bi bi-calculator"></i> {% t "Payroll (live)" %}</div>
+      <ul class="list-group list-group-flush small">
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Basic amount" %}</span><strong data-sl="basic">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "OT amount" %}</span><strong data-sl="ot">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Bonus / Incentive" %}</span><strong data-sl="bonus">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span>{% t "Gross" %}</span><strong data-sl="gross">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between text-danger"><span>− {% t "Advance" %}</span><strong data-sl="advance">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between text-danger"><span>− {% t "Other deductions" %}</span><strong data-sl="other">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between" data-sl-row="prev"><span class="text-muted">+ {% t "Previous pending (added)" %}</span><strong data-sl="prev">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between bg-leaf"><span class="fw-semibold">{% t "Net payable" %}</span><strong data-sl="net">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Already paid" %}</span><strong data-sl="paid">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between" data-sl-row="carried"><span class="text-muted">{% t "Moved to a later payroll" %}</span><strong data-sl="carried">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Pending before this payment" %}</span><strong data-sl="before">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between text-success" data-sl-row="now"><span>− {% t "Current payment amount" %}</span><strong data-sl="now">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center" data-sl-row="state"><span class="text-muted">{% t "Saved as" %}</span><span data-sl="state"><span class="badge text-bg-success" data-sl-state="paid"><i class="bi bi-check2-circle"></i> {% t "Paid" %}</span><span class="badge text-bg-warning" data-sl-state="pending"><i class="bi bi-hourglass-split"></i> {% t "Pending (not paid)" %}</span></span></li>
+        <li class="list-group-item d-flex justify-content-between sl-balance"><span class="fw-semibold">{% t "Balance (pending) after" %}</span><strong data-sl="after">0</strong></li>
+      </ul>
+      <div class="card-footer small text-danger" data-sl="warn" hidden>{% t "More than is pending: reduce the current payment." %}</div>
+      <div class="card-footer small text-warning-emphasis bg-warning-subtle" data-sl="pendingnote" hidden><i class="bi bi-info-circle"></i> {% t "The status is Pending: this payment is recorded as Pending (not paid) and is not counted as paid. Choose the status Paid to count it." %}</div>
+    </div>
+    {{ salary_live|json_script:"salary-live" }}
+    {% endif %}
+    {% if sale_live %}
+    <div class="card mb-3 salary-live" id="saleLive"><div class="card-header"><i class="bi bi-calculator"></i> {% t "Calculated values" %}</div>
+      <ul class="list-group list-group-flush small">
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Quantity" %} × {% t "Rate" %}</span><strong data-sv="calc">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between bg-leaf"><span class="fw-semibold">{% t "Total amount" %}</span><strong data-sv="total">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Received so far" %}</span><strong class="text-success" data-sv="received">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Still to receive (before now)" %}</span><strong data-sv="before">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between text-success" data-sv-row="now"><span>− {% t "Amount received now" %}</span><strong data-sv="now">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between sl-balance"><span class="fw-semibold">{% t "Balance to receive after" %}</span><strong data-sv="after">0</strong></li>
+        <li class="list-group-item">
+          <div class="d-flex justify-content-between mb-1"><span class="text-muted">{% t "Received" %}</span><strong data-sv="pct">0 %</strong></div>
+          <div class="progress" style="height:8px"><div class="progress-bar bg-success" data-sv="bar" style="width:0%"></div><div class="progress-bar bg-success opacity-50" data-sv="barnow" style="width:0%"></div></div>
+        </li>
+        {% if sale %}
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Sold date" %}</span><strong>{{ sale.date|date:"d/m/y" }}</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Payment received date (last)" %}</span><strong>{{ sale.last_received_on|date:"d/m/y"|default:"–" }}</strong></li>
+        {% if sale.balance > 0 %}<li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Days since sold" %}</span><strong>{{ days_since_sold }}</strong></li>{% endif %}
+        {% endif %}
+      </ul>
+      {% if receipts %}
+      <div class="card-body border-top py-2 small">
+        <div class="text-muted mb-1">{% t "When the money came in" %}</div>
+        <ol class="sale-timeline mb-0">
+          {% for r in receipts %}<li><span class="fw-semibold">{{ r.date|date:"d/m/y" }}</span> · {{ CURRENCY }} {{ r.amount|inr }} <span class="text-muted">({{ r.percent|floatformat:0 }} %)</span><div class="text-muted">{% t "Balance after" %}: {{ r.balance_after|inr }}</div></li>{% endfor %}
+        </ol>
+      </div>{% endif %}
+      <div class="card-footer small text-danger" data-sv="warn" hidden>{% t "More than is still to receive: reduce the amount received now." %}</div>
+    </div>
+    {{ sale_live|json_script:"sale-live" }}
+    {% endif %}
+    {% if cfg.slug == 'group-work' or cfg.slug == 'field-operations' or cfg.slug == 'processing' %}
+    <div class="card mb-3" id="liveCalc"><div class="card-header"><i class="bi bi-calculator"></i> {% t "Cost of this entry (live)" %}</div>
+      <ul class="list-group list-group-flush small">
+        {% if cfg.slug == 'group-work' %}
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Total wages" %}</span><strong class="text-nowrap" data-calc="wages">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "OT hours (morning + evening)" %}</span><strong class="text-nowrap" data-calc="othours">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Overtime amount" %}</span><strong class="text-nowrap" data-calc="otamt">0</strong></li>
+        {% elif cfg.slug == 'processing' %}
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Input quantity x cost per kg" %}</span><strong class="text-nowrap" data-calc="perkg">0</strong></li>
+        {% else %}
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Fertilizer / chemical cost" %}</span><strong class="text-nowrap" data-calc="input">0</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Labour cost" %}</span><strong class="text-nowrap" data-calc="labour">0</strong></li>
+        {% endif %}
+        <li class="list-group-item d-flex justify-content-between"><span>{% t "Total cost" %}</span><strong class="text-nowrap" data-calc="total">0</strong></li>
+      </ul>
+    </div>
+    {% endif %}
+    {% module_help cfg as help %}
+    <div class="card bg-leaf"><div class="card-body small">
+      {% if help %}<i class="bi bi-info-circle"></i> {{ help }}{% endif %}
+      <div class="{% if help %}mt-2 {% endif %}text-muted">{% t "Totals, ratios and amounts are calculated automatically when you save." %}</div>
+    </div></div>
+  </div>
+</div>
+{{ form_data|json_script:"form-data" }}
+<div class="modal fade add-new-modal" id="addNewModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-fullscreen-sm-down"><div class="modal-content">
+    <div class="modal-header py-2"><h5 class="modal-title h6" id="addNewTitle"></h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{% t 'Close' %}"></button></div>
+    <div class="modal-body"><iframe id="addNewFrame" title="{% t 'Add new' %}"></iframe></div>
+  </div></div>
+</div>
+<script id="form-text" type="application/json">{"addNew": "{% filter escapejs %}{% t '+ Add new…' %}{% endfilter %}", "history": "{% filter escapejs %}{% t 'From wage history: {from} to {to}' %}{% endfilter %}", "now": "{% filter escapejs %}{% t 'now' %}{% endfilter %}", "nohist": "{% filter escapejs %}{% t 'Job type default (no wage period covers this date)' %}{% endfilter %}", "fromList": "{% filter escapejs %}{% t '{cost} per {unit} from the list' %}{% endfilter %}", "currency": "{{ CURRENCY|escapejs }}", "hpNone": "{% filter escapejs %}{% t 'Nobody did this job on this date: add the Daily Labour Count or Work Details for it.' %}{% endfilter %}", "hpPick": "{% filter escapejs %}{% t 'Choose the date, product and job, and enter the quantity.' %}{% endfilter %}", "hpNoJob": "{% filter escapejs %}{% t 'This product has no picking job: choose the job.' %}{% endfilter %}", "hpOt": "{% filter escapejs %}{% t '{n} people did OT' %}{% endfilter %}", "hpOthers": "{% filter escapejs %}{% t 'includes {qty} from other harvests of this day' %}{% endfilter %}", "hpAvgOt": "{% filter escapejs %}{% t 'average {h} OT hours' %}{% endfilter %}", "meSearch": "{% filter escapejs %}{% t 'Search employees…' %}{% endfilter %}", "meCount": "{% filter escapejs %}{% t '{n} selected' %}{% endfilter %}", "meAll": "{% filter escapejs %}{% t 'Select shown' %}{% endfilter %}", "meNone": "{% filter escapejs %}{% t 'Clear' %}{% endfilter %}", "meMany": "{% filter escapejs %}{% t '{n} employees selected: one entry is saved for each, with their own work type, wage and OT rate for the date. Only the date and block can be changed; to change a wage, select just one employee.' %}{% endfilter %}", "meLabel": "{% filter escapejs %}{% t 'Employees (select one or more)' %}{% endfilter %}"}</script>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const data = JSON.parse(document.getElementById("form-data").textContent);
+  const text = JSON.parse(document.getElementById("form-text").textContent);
+  const $ = (name) => document.getElementById("id_" + name);
+  const form = document.getElementById("mainForm");
+  const fmt = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (iso) => (iso && window.pmsDate ? window.pmsDate.fromISO(iso) : iso || "");
+  const fill = (tpl, vals) => tpl.replace(/\{(\w+)\}/g, (_, k) => (k in vals ? vals[k] : ""));
+  const isEmpty = (el) => el.value === "" || Number(el.value) === 0;
+
+  // "+ Add new…" at the end of drop-downs: opens that list's form in a pop-up; the new record is added to
+  // the drop-down and selected, and nothing typed on this page is lost
+  const ADD = "__add_new__";
+  const modalEl = document.getElementById("addNewModal");
+  const frame = document.getElementById("addNewFrame");
+  let modal = null, addingFor = null;
+  for (const [field, cfg] of Object.entries(data.add_new || {})) {
+    const sel = $(field);
+    if (!sel || sel.tagName !== "SELECT") continue;
+    const opt = new Option(text.addNew, ADD);
+    opt.className = "add-new-option";
+    sel.add(opt);
+    let previous = sel.value;
+    sel.addEventListener("focus", () => { previous = sel.value; });
+    sel.addEventListener("change", (e) => {
+      if (sel.value !== ADD) { previous = sel.value; return; }
+      e.stopImmediatePropagation();  // other helpers must not react to the "Add new" entry
+      sel.value = previous;
+      addingFor = field;
+      document.getElementById("addNewTitle").textContent = cfg.title;
+      let url = cfg.url;
+      // e.g. a new fertilizer added from a "Fertilizer application" gets the operation's input type already chosen
+      if (data.narrow && field === data.narrow.target && $(data.narrow.trigger)) {
+        const want = data.narrow.trigger_values[$(data.narrow.trigger).value];
+        if (want) url += "&" + encodeURIComponent(data.narrow.attr.replace(/_id$/, "")) + "=" + encodeURIComponent(want);
+      }
+      if (window.pmsDemo && window.parent.__pmsFetch) openInDemo(url);  // in-browser demo: no web server
+      else frame.src = url;
+      modal = modal || new bootstrap.Modal(modalEl);
+      modal.show();
+    });
+  }
+  // In the in-browser demo the pop-up's pages come from the Django running in the browser, not from a URL
+  function openInDemo(url) {
+    const show = (res) => {
+      if (res.kind === "html") frame.srcdoc = res.content;
+    };
+    frame.onload = () => {
+      const doc = frame.contentDocument, popForm = doc && doc.getElementById("mainForm");
+      if (!popForm) return;
+      popForm.addEventListener("submit", (ev) => {
+        ev.preventDefault();
+        const body = new URLSearchParams(new FormData(popForm, ev.submitter)).toString();
+        show(window.parent.__pmsFetch("POST", url, body));
+      });
+    };
+    show(window.parent.__pmsFetch("GET", url));
+  }
+  if (modalEl) modalEl.addEventListener("hidden.bs.modal", () => {
+    frame.onload = null;
+    frame.removeAttribute("srcdoc");
+    frame.src = "about:blank";
+    addingFor = null;
+  });
+  window.addEventListener("message", (e) => {
+    // only our own pop-up frame may answer
+    if (!addingFor || !e.data || e.source !== frame.contentWindow) return;
+    if (e.data.type === "pms-cancel") { modal.hide(); return; }
+    if (e.data.type !== "pms-added") return;
+    const field = addingFor, sel = $(field), a = e.data.attrs || {};
+    // let the other helpers know the new record (cost per unit, wage, unit, type ...)
+    for (const [source, fk] of Object.entries(data.fk || {})) {
+      if (source !== field) continue;
+      const row = { unit: a.unit || "" };
+      for (const attr of Object.values(fk.targets)) row[attr] = a[attr] || "";
+      fk.rows[e.data.id] = row;
+    }
+    if (data.job && field === "job_type") data.job.jobs[e.data.id] = { wage: a.default_daily_wage, ot: a.default_ot_rate, history: a.history || [] };
+    if (data.job && field === "employee") data.job.employees[e.data.id] = { job: a.job_type_id, type: a.employment_type_id ? Number(a.employment_type_id) : null };
+    if (data.narrow) {
+      const attr = Object.keys(a).find((k) => k === data.narrow.attr);
+      if (field === data.narrow.trigger && attr) data.narrow.trigger_values[e.data.id] = Number(a[attr]) || a[attr];
+      if (field === data.narrow.target && attr) data.narrow.target_values[e.data.id] = Number(a[attr]) || a[attr];
+    }
+    const opt = new Option(e.data.label, e.data.id, true, true);
+    sel.insertBefore(opt, sel.querySelector('option[value="' + ADD + '"]'));
+    sel.value = e.data.id;
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    modal.hide();
+  });
+
+  function hint(el, msg) {
+    let h = el.parentElement.querySelector(".rate-hint");
+    if (!h) { h = document.createElement("div"); h.className = "form-text rate-hint text-success"; el.insertAdjacentElement("afterend", h); }
+    h.textContent = msg;
+  }
+  function setValue(el, value, msg) {
+    el.value = Number(value);
+    if (msg) hint(el, msg);
+    el.classList.add("is-valid");
+    setTimeout(() => el.classList.remove("is-valid"), 1200);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  // wage / OT rate from the work type, for the entry date
+  if (data.job && $("job_type")) {
+    const job = $("job_type"), date = $("date"), emp = $("employee");
+    const empInfo = () => (emp && data.job.employees[emp.value]) || {};
+    const rateFor = (jobId, onDate, empType) => {
+      const j = data.job.jobs[jobId];
+      if (!j) return null;
+      if (onDate) {
+        const valid = j.history.filter((x) => x.from <= onDate && (!x.to || x.to >= onDate));
+        const r = (empType && valid.find((x) => x.type === empType)) || valid.find((x) => !x.type);
+        if (r) return { wage: r.wage, ot: Number(r.ot) ? r.ot : j.ot,
+                        note: fill(text.history, { from: fmtDate(r.from), to: r.to ? fmtDate(r.to) : text.now }) };
+      }
+      return { wage: j.wage, ot: j.ot, note: text.nohist };
+    };
+    const apply = (onlyEmpty) => {
+      const r = rateFor(job.value, date && window.pmsDate ? window.pmsDate.toISO(date.value) || null : null, empInfo().type);
+      if (!r) return;
+      for (const [field, key] of Object.entries(data.job.fields)) {
+        const el = $(field);
+        if (el && (!onlyEmpty || isEmpty(el))) setValue(el, r[key], r.note);
+      }
+    };
+    if (emp) emp.addEventListener("change", () => {
+      const info = empInfo();
+      if (info.job && job.value !== info.job) job.value = info.job;
+      apply(false);  // the wage may differ by employee type even for the same job
+    });
+    job.addEventListener("change", () => apply(false));
+    if (date) date.addEventListener("change", () => apply(false));
+    apply(true);
+  }
+
+  // picking a record fills other fields (fertilizer -> cost per unit, product -> sale rate)
+  for (const [source, cfg] of Object.entries(data.fk || {})) {
+    const sel = $(source);
+    if (!sel) continue;
+    const apply = (onlyEmpty) => {
+      const row = cfg.rows[sel.value];
+      if (!row) return;
+      for (const [target, attr] of Object.entries(cfg.targets)) {
+        const el = $(target);
+        if (el && (!onlyEmpty || isEmpty(el))) {
+          setValue(el, row[attr], fill(text.fromList, { cost: text.currency + " " + fmt.format(row[attr]), unit: row.unit || "1" }));
+        }
+      }
+    };
+    sel.addEventListener("change", () => apply(false));
+    apply(true);
+  }
+
+  // an operation narrows the fertilizer / chemical list to its usual type
+  if (data.narrow && $(data.narrow.trigger) && $(data.narrow.target)) {
+    const trig = $(data.narrow.trigger), target = $(data.narrow.target);
+    const narrow = () => {
+      const want = data.narrow.trigger_values[trig.value];
+      for (const opt of target.options) {
+        if (!opt.value || opt.value === "__add_new__") continue;
+        const show = !want || data.narrow.target_values[opt.value] === want || opt.value === target.value;
+        opt.hidden = !show;
+        opt.disabled = !show;
+      }
+    };
+    trig.addEventListener("change", narrow);
+    narrow();
+  }
+
+  // harvest per person, live (same sums as estate/productivity.py: everything in hours)
+  if (data.harvest && document.getElementById("harvestPreview")) {
+    const box = document.getElementById("harvestPreview");
+    const hp = (k) => box.querySelector('[data-hp="' + k + '"]');
+    const n2 = (x) => fmt.format(x);
+    const n1 = (x) => (Math.round(x * 10) / 10).toLocaleString("en-IN");
+    let people = null, lastKey = "", seq = 0;
+    const jobId = () => ($("job_type") && $("job_type").value) || ((data.harvest.products[$("product").value] || {}).job || "");
+    const unit = () => ((data.harvest.products[$("product").value] || {}).unit || "");
+    const show = (msg) => { hp("status").textContent = msg; hp("status").hidden = !msg; hp("rows").hidden = !!msg; };
+
+    function render() {
+      if (!people) return;
+      if (!people.ok) {
+        show($("product").value && !jobId() ? text.hpNoJob : text.hpPick);
+        hp("job").textContent = "";
+        return;
+      }
+      const H = people.hours, u = unit() ? " " + unit() : "";
+      const heads = people.ind_people + people.count_people;
+      const otHours = people.ind_ot_hours + people.count_ot_hours;
+      const otPeople = people.ind_ot_people + people.count_ot_people;
+      const qty = people.other_quantity + (parseFloat(($("quantity") || {}).value) || 0);
+      const hours = heads * H + otHours;
+      hp("job").textContent = people.job;
+      if (!heads && !otHours) { show(text.hpNone); return; }
+      show("");
+      const perHour = hours ? qty / hours : 0, avgOt = otPeople ? otHours / otPeople : 0;
+      const ot = (n, h) => h ? ` (${fill(text.hpOt, { n: n1(n) })}, ${n1(h)} h)` : "";
+      hp("ind").textContent = n1(people.ind_people) + ot(people.ind_ot_people, people.ind_ot_hours);
+      hp("count").textContent = n1(people.count_people) + ot(people.count_ot_people, people.count_ot_hours);
+      hp("ot").textContent = n1(otHours) + " h";
+      hp("hours").textContent = `${n1(heads)} × ${n1(H)} h + ${n1(otHours)} h = ${n1(hours)} h`;
+      hp("qty").textContent = n2(qty) + u + (people.other_quantity ? ` (${fill(text.hpOthers, { qty: n2(people.other_quantity) })})` : "");
+      hp("per_hour").textContent = `${n2(qty)} ÷ ${n1(hours)} h = ${n2(perHour)}${u}`;
+      hp("full_day").textContent = `${n2(perHour)} × ${n1(H)} h = ${n2(perHour * H)}${u}`;
+      hp("person_ot").textContent = avgOt ? `${n2(perHour)} × ${n1(avgOt)} h = ${n2(perHour * avgOt)}${u}` : "0";
+      hp("full_day_ot").textContent = avgOt
+        ? `${n2(perHour)} × (${n1(H)} + ${n1(avgOt)}) h = ${n2(perHour * (H + avgOt))}${u}` : n2(perHour * H) + u;
+      hp("average").textContent = heads ? `${n2(qty)} ÷ ${n1(heads)} = ${n2(qty / heads)}${u}` : "0";
+    }
+    function load() {
+      const day = $("date") && window.pmsDate ? window.pmsDate.toISO($("date").value) : "";
+      const job = jobId();
+      const key = day + "|" + job;
+      if (!day || !job) { people = { ok: false }; lastKey = ""; render(); return; }
+      if (key === lastKey) { render(); return; }
+      lastKey = key;
+      const q = new URLSearchParams({ date: day, job: job, pk: data.harvest.pk || "" });
+      const url = data.harvest.url + "?" + q;
+      const mine = ++seq;
+      const done = (json) => { if (mine === seq) { people = json; render(); } };
+      if (window.pmsDemo && window.parent.__pmsFetch) {  // in-browser demo: no web server
+        try { done(JSON.parse(window.parent.__pmsFetch("GET", url).content)); } catch (e) { done({ ok: false }); }
+      } else {
+        fetch(url, { credentials: "same-origin" }).then((r) => r.json()).then(done).catch(() => done({ ok: false }));
+      }
+    }
+    ["date", "product", "job_type"].forEach((n) => $(n) && $(n).addEventListener("change", load));
+    if ($("quantity")) $("quantity").addEventListener("input", render);
+    load();
+  }
+
+  // Work Details - Individual: pick several employees at once (one entry each, saved by the server)
+  if (data.multi && $("employee")) {
+    const sel = $("employee");
+    const wrap = sel.closest('[class*="col-"]');
+    const keep = new Set(["date", "block"]);
+    const others = Array.from(form.querySelectorAll(".row.g-3 > [class*='col-']")).filter((c) => c !== wrap &&
+      !Array.from(c.querySelectorAll("input,select,textarea")).some((f) => keep.has(f.name)));
+    const box = document.createElement("div");
+    box.className = "multi-emp border rounded p-2";
+    const search = Object.assign(document.createElement("input"), { type: "search", className: "form-control form-control-sm mb-2", placeholder: text.meSearch });
+    const list = document.createElement("div");
+    list.className = "multi-emp-list";
+    const foot = document.createElement("div");
+    foot.className = "d-flex flex-wrap gap-2 align-items-center small mt-2";
+    const count = document.createElement("span");
+    count.className = "text-muted me-auto";
+    const allBtn = Object.assign(document.createElement("button"), { type: "button", className: "btn btn-sm btn-link p-0", textContent: text.meAll });
+    const noneBtn = Object.assign(document.createElement("button"), { type: "button", className: "btn btn-sm btn-link p-0", textContent: text.meNone });
+    foot.append(count, allBtn, noneBtn);
+    const note = document.createElement("div");
+    note.className = "alert alert-info small py-2 mt-2 mb-0";
+    note.hidden = true;
+    const rows = data.multi.employees.map((e) => {
+      const lab = document.createElement("label");
+      lab.className = "form-check multi-emp-row";
+      const cb = Object.assign(document.createElement("input"), { type: "checkbox", name: "employees", value: String(e.id), className: "form-check-input" });
+      cb.checked = sel.value === String(e.id);
+      const name = document.createElement("span");
+      name.className = "form-check-label";
+      name.textContent = e.name;
+      const meta = document.createElement("small");
+      meta.className = "text-muted ms-1";
+      meta.textContent = `${e.code} · ${e.job}`;
+      lab.append(cb, name, meta);
+      list.append(lab);
+      return { lab, cb, key: (e.name + " " + e.code + " " + e.job).toLowerCase() };
+    });
+    box.append(search, list, foot, note);
+    sel.hidden = true;
+    sel.insertAdjacentElement("afterend", box);
+    const label = wrap.querySelector("label.form-label");
+    if (label) label.textContent = text.meLabel;
+    wrap.className = "col-12 col-lg-8";
+
+    function update() {
+      const picked = rows.filter((r) => r.cb.checked);
+      count.textContent = fill(text.meCount, { n: picked.length });
+      const many = picked.length > 1;
+      others.forEach((c) => (c.hidden = many));
+      note.hidden = !many;
+      note.textContent = fill(text.meMany, { n: picked.length });
+      // the normal single-entry form (with wage / OT auto-fill) takes over for exactly one employee
+      const one = picked.length === 1 ? picked[0].cb.value : "";
+      if (sel.value !== one) { sel.value = one; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+      others.forEach((c) => c.querySelectorAll("input,select,textarea").forEach((f) => (f.disabled = many)));
+    }
+    list.addEventListener("change", update);
+    search.addEventListener("input", () => {
+      const q = search.value.trim().toLowerCase();
+      rows.forEach((r) => (r.lab.hidden = q && !r.key.includes(q)));
+    });
+    allBtn.addEventListener("click", () => { rows.forEach((r) => { if (!r.lab.hidden) r.cb.checked = true; }); update(); });
+    noneBtn.addEventListener("click", () => { rows.forEach((r) => (r.cb.checked = false)); update(); });
+    update();
+  }
+
+  // sale add / edit: total, received, still to receive as you type
+  const svData = document.getElementById("sale-live");
+  if (svData) {
+    const S = JSON.parse(svData.textContent);
+    const box = document.getElementById("saleLive");
+    const sv = (k) => box.querySelector('[data-sv="' + k + '"]');
+    const val = (name) => parseFloat((($(name) || {}).value || "").replace(/,/g, "")) || 0;
+    function saleCalc() {
+      const qty = val("quantity"), rate = val("rate");
+      const total = Math.round(qty * rate * 100) / 100;
+      const before = total - S.received;
+      const now = val("received_now");
+      const after = before - now;
+      sv("calc").textContent = fmt.format(qty) + " × " + fmt.format(rate);
+      sv("total").textContent = fmt.format(total);
+      sv("received").textContent = fmt.format(S.received);
+      sv("before").textContent = fmt.format(before);
+      sv("now").textContent = fmt.format(now);
+      sv("after").textContent = fmt.format(after);
+      box.querySelector('[data-sv-row="now"]').classList.toggle("d-none", !now);
+      const pctOld = total ? Math.min(100, (S.received / total) * 100) : 0;
+      const pctNow = total ? Math.min(100 - pctOld, (now / total) * 100) : 0;
+      sv("pct").textContent = Math.round(pctOld + pctNow) + " %";
+      sv("bar").style.width = pctOld + "%";
+      sv("barnow").style.width = pctNow + "%";
+      const over = now > before + 0.005;
+      sv("warn").hidden = !over;
+      sv("after").classList.toggle("text-danger", after > 0.005 || over);
+      sv("after").classList.toggle("text-success", Math.abs(after) <= 0.005 && !over && total > 0);
+      const cur = $("received_now");
+      if (cur) cur.classList.toggle("is-invalid", over);
+    }
+    form.addEventListener("input", saleCalc);
+    form.addEventListener("change", saleCalc);
+    saleCalc();
+  }
+
+  // payroll edit: live gross / deductions / net / balance as you type (same sums as SalaryPayment.save)
+  const slData = document.getElementById("salary-live");
+  if (slData) {
+    const L = JSON.parse(slData.textContent);
+    const box = document.getElementById("salaryLive");
+    const sl = (k) => box.querySelector('[data-sl="' + k + '"]');
+    const num = (name) => parseFloat((($(name) || {}).value || "").replace(/,/g, "")) || 0;
+    const m2 = (x) => fmt.format(x);
+    function salaryCalc() {
+      let basic = L.basic, ot = L.ot;
+      if (!L.locked) {  // typed by hand: days x daily rate, OT hours x OT rate
+        const days = num("full_days") + num("half_days") * 0.5;
+        basic = days * (num("daily_rate") || L.daily_rate);
+        ot = num("ot_hours") * (num("ot_rate") || L.ot_rate);
+      }
+      const bonus = num("bonus"), adv = num("advance_deduction"), other = num("other_deduction");
+      const gross = basic + ot + bonus;
+      const net = gross - adv - other + L.previous_pending;
+      const before = net - L.paid - L.carried;
+      const typed = num("current_payment");
+      const statusEl = $("status");
+      const paidNow = !statusEl || (L.final_statuses || []).includes(parseInt(statusEl.value, 10));
+      const now = paidNow ? typed : 0;  // a 'Pending' payment is recorded but not paid
+      const after = before - now;
+      sl("basic").textContent = m2(basic); sl("ot").textContent = m2(ot); sl("bonus").textContent = m2(bonus);
+      sl("gross").textContent = m2(gross); sl("advance").textContent = m2(adv); sl("other").textContent = m2(other);
+      sl("prev").textContent = m2(L.previous_pending); sl("net").textContent = m2(net);
+      sl("paid").textContent = m2(L.paid); sl("carried").textContent = m2(L.carried);
+      sl("before").textContent = m2(before); sl("now").textContent = m2(typed); sl("after").textContent = m2(after);
+      const nowRow = box.querySelector('[data-sl-row="now"]');
+      nowRow.classList.toggle("text-success", paidNow);
+      nowRow.classList.toggle("text-muted", !paidNow);
+      nowRow.querySelector("strong").style.textDecoration = paidNow ? "" : "line-through";
+      box.querySelector('[data-sl-row="state"]').classList.toggle("d-none", !typed);
+      box.querySelectorAll("[data-sl-state]").forEach((b) => b.classList.toggle("d-none", (b.dataset.slState === "paid") !== paidNow));
+      sl("pendingnote").hidden = !typed || paidNow;
+      box.querySelector('[data-sl-row="prev"]').classList.toggle("d-none", !L.previous_pending);
+      box.querySelector('[data-sl-row="carried"]').classList.toggle("d-none", !L.carried);
+      const over = typed > before + 0.005;
+      sl("warn").hidden = !over;
+      sl("after").classList.toggle("text-danger", after > 0.005 || over);
+      sl("after").classList.toggle("text-success", Math.abs(after) <= 0.005 && !over);
+      const cur = $("current_payment");
+      if (cur) cur.classList.toggle("is-invalid", over);
+    }
+    form.addEventListener("input", salaryCalc);
+    form.addEventListener("change", salaryCalc);
+    salaryCalc();
+  }
+
+  // live cost box
+  const v = (name) => parseFloat(($(name) || {}).value) || 0;
+  const out = (k, x) => { const el = document.querySelector('[data-calc="' + k + '"]'); if (el) el.textContent = x; };
+  const money = (x) => text.currency + " " + fmt.format(x);
+  function calc() {
+    if (document.querySelector('[data-calc="wages"]')) {
+      const workers = v("male_workers") + v("female_workers") || v("workers_count"); // same rule as saving
+      const wages = workers * v("wage_per_worker");
+      const otHours = v("ot_morning_workers") * v("ot_morning_hours") + v("ot_evening_workers") * v("ot_evening_hours");
+      const otAmt = otHours * v("ot_rate_per_hour");
+      out("wages", money(wages)); out("othours", fmt.format(otHours) + " h"); out("otamt", money(otAmt)); out("total", money(wages + otAmt));
+    } else if (document.querySelector('[data-calc="perkg"]')) {
+      const qty = v("input_quantity"), rate = v("processing_cost");
+      out("perkg", fmt.format(qty) + " x " + fmt.format(rate)); out("total", money(qty * rate));
+    } else if (document.querySelector('[data-calc="input"]')) {
+      const input = v("quantity") * v("unit_cost"), labour = v("workers_count") * v("wage_per_worker");
+      out("input", money(input)); out("labour", money(labour)); out("total", money(input + labour));
+    }
+  }
+  form.addEventListener("input", calc);
+  form.addEventListener("change", calc);
+  calc();
+
+  // wage history: add a row
+  const add = document.getElementById("addRate");
+  if (add) add.addEventListener("click", () => {
+    const total = document.getElementById("id_rates-TOTAL_FORMS");
+    const i = Number(total.value);
+    document.getElementById("rateRows").insertAdjacentHTML("beforeend",
+      document.getElementById("rateTemplate").innerHTML.replace(/__prefix__/g, String(i)));
+    total.value = i + 1;
+    const first = document.getElementById(`id_rates-${i}-effective_from`);
+    if (first) first.focus();
+  });
+})();
+</script>
+{% endblock %}

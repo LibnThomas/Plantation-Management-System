@@ -1,0 +1,113 @@
+{% extends "base.html" %}{% load estate_tags core_tags %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1><i class="bi {{ cfg.icon }} text-primary"></i> {{ title }}</h1>
+    {% module_help cfg as help %}{% if help %}<div class="text-muted small">{{ help }}</div>{% endif %}
+    {% if is_lookup %}<div class="text-muted small"><a href="{% url 'estate:lookups' %}"><i class="bi bi-arrow-left"></i> {% t "All drop-down lists" %}</a></div>{% endif %}
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    {% if cfg.slug == 'attendance' %}<a class="btn btn-outline-primary btn-sm" href="{% url 'estate:attendance_bulk' %}"><i class="bi bi-ui-checks-grid"></i> {% t "Mark Daily Attendance" %}</a>{% endif %}
+    {% if cfg.slug == 'salary-payments' %}<a class="btn btn-outline-primary btn-sm" href="{% url 'estate:payroll_generate' %}"><i class="bi bi-calculator"></i> {% t "Generate Payroll" %}</a>{% endif %}
+    <a class="btn btn-outline-secondary btn-sm" href="{% url 'estate:export' cfg.slug %}?{{ request.GET.urlencode }}"><i class="bi bi-filetype-csv"></i> {% t "Excel (CSV)" %}</a>
+    <a class="btn btn-outline-secondary btn-sm" href="{% url 'estate:pdf' cfg.slug %}?{{ request.GET.urlencode }}"><i class="bi bi-file-earmark-pdf"></i> PDF</a>
+    {% if can_edit and cfg.can_add %}<a class="btn btn-primary btn-sm" href="{% url 'estate:create' cfg.slug %}"><i class="bi bi-plus-lg"></i> {% t "Add" %}</a>{% endif %}
+  </div>
+</div>
+
+{% if cfg.slug == 'attendance' %}{% include "estate/_attendance_tabs.html" with tab="list" %}{% endif %}
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <form method="get" class="filter-bar row g-2 align-items-end">
+      {% if cfg.search_fields %}
+      <div class="col-12 col-md-3">
+        <label class="form-label small mb-0" for="f-q">{% t "Search" %}</label>
+        <input id="f-q" type="search" name="q" value="{{ request.GET.q }}" class="form-control form-control-sm" placeholder="{% t 'Search...' %}">
+      </div>{% endif %}
+      {% if cfg.date_field %}
+      <div class="col-6 col-md-2"><label class="form-label small mb-0" for="f-from">{% t "From" %}</label>
+        <input id="f-from" type="text" name="date_from" value="{{ date_from_text }}" class="form-control form-control-sm pms-date" placeholder="DD/MM/YY" autocomplete="off"></div>
+      <div class="col-6 col-md-2"><label class="form-label small mb-0" for="f-to">{% t "To" %}</label>
+        <input id="f-to" type="text" name="date_to" value="{{ date_to_text }}" class="form-control form-control-sm pms-date" placeholder="DD/MM/YY" autocomplete="off"></div>
+      {% endif %}
+      {% for f in filter_widgets %}
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-0" for="f-{{ f.name }}">{{ f.label }}</label>
+        <select id="f-{{ f.name }}" name="{{ f.name }}" class="form-select form-select-sm">
+          <option value="">{% t "All" %}</option>
+          {% for v, l in f.options %}<option value="{{ v }}" {% if v == f.selected %}selected{% endif %}>{{ l }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endfor %}
+      <div class="col-12 col-md-auto d-flex gap-2">
+        <button class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> {% t "Filter" %}</button>
+        {% if active_filters %}<a href="{{ request.path }}" class="btn btn-sm btn-outline-secondary">{% t "Clear" %}</a>{% endif %}
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>{% t "{n} records" n=count %}</span>
+    <button class="btn btn-sm btn-link no-print" onclick="window.print()"><i class="bi bi-printer"></i> {% t "Print" %}</button>
+  </div>
+  <div class="table-responsive table-scroll">
+    <table class="table table-hover table-sm table-data mb-0 align-middle">
+      <thead><tr>
+        {% for c in columns %}<th class="{% if c.numeric %}num{% endif %}">{{ c.label }}</th>{% endfor %}
+        <th class="text-end no-print">{% t "Actions" %}</th>
+      </tr></thead>
+      <tbody>{% t 'Edit' as t_edit %}{% t 'Delete' as t_delete %}{% t 'Profile' as t_profile %}{% t 'Payslip' as t_payslip %}
+      {% for r in rows %}
+        <tr>
+          {% for v, isnum in r.cells %}<td{% if isnum %} class="num"{% endif %}>{{ v }}</td>{% endfor %}
+          <td class="text-end text-nowrap no-print">
+            {% if cfg.slug == 'employees' %}<a class="btn btn-sm btn-link px-1" title="{{ t_profile }}" href="{% url 'estate:employee_profile' r.obj.pk %}"><i class="bi bi-person-lines-fill"></i></a>{% endif %}
+            {% if cfg.slug == 'salary-paid' %}<a class="btn btn-sm btn-link px-1" title="{% t 'Payment history' %}" href="{% url 'estate:salary_paid' r.obj.pk %}"><i class="bi bi-eye"></i></a>{% endif %}
+            {% if cfg.slug == 'salary-payments' %}<a class="btn btn-sm btn-link px-1" title="{{ t_payslip }}" href="{% url 'estate:payslip' r.obj.pk %}"><i class="bi bi-file-earmark-text"></i></a>{% endif %}
+            {% if can_edit %}<a class="btn btn-sm btn-link px-1" title="{{ t_edit }}" href="{{ r.edit_url }}"><i class="bi bi-pencil-square"></i></a>
+            <a class="btn btn-sm btn-link text-danger px-1" title="{{ t_delete }}" href="{{ r.delete_url }}" data-confirm data-kind="{{ record_name }}" data-name="{{ r.obj }}"><i class="bi bi-trash"></i></a>{% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="{{ columns|length|add:1 }}" class="text-center text-muted py-5">
+          <i class="bi bi-inbox fs-2 d-block"></i>{% t "No records yet." %}{% if can_edit and cfg.can_add %} <a href="{% url 'estate:create' cfg.slug %}">{% t "Add the first one" %}</a>{% endif %}
+        </td></tr>
+      {% endfor %}
+      </tbody>
+      {% if has_totals and rows %}
+      <tfoot><tr>
+        {% for t in total_cells %}<td class="num">{% if forloop.first and t is None %}{% t "Total (all filtered)" %}{% elif t is not None %}{{ t|num }}{% endif %}</td>{% endfor %}
+        <td class="no-print"></td>
+      </tr></tfoot>
+      {% endif %}
+    </table>
+  </div>
+  {% if count > page_sizes.0 %}
+  <div class="card-footer bg-white d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
+    <div class="d-flex align-items-center gap-2">
+      <small class="text-muted">{% t "Page {n} of {total}" n=page.number total=page.paginator.num_pages %}</small>
+      <form method="get" class="d-flex align-items-center gap-1">
+        {% for k, vals in request.GET.lists %}{% if k != "per_page" and k != "page" %}{% for v in vals %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endif %}{% endfor %}
+        <label class="small text-muted" for="pp">{% t "Rows per page" %}</label>
+        <select id="pp" name="per_page" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
+          {% for n in page_sizes %}<option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>{% endfor %}
+        </select>
+      </form>
+    </div>
+    <ul class="pagination pagination-sm mb-0">
+      {% if page.has_previous %}
+        <li class="page-item"><a class="page-link" href="?{% qs_replace page=1 %}">&laquo;</a></li>
+        <li class="page-item"><a class="page-link" href="?{% qs_replace page=page.previous_page_number %}">{% t "Previous" %}</a></li>
+      {% endif %}
+      {% if page.has_next %}
+        <li class="page-item"><a class="page-link" href="?{% qs_replace page=page.next_page_number %}">{% t "Next" %}</a></li>
+        <li class="page-item"><a class="page-link" href="?{% qs_replace page=page.paginator.num_pages %}">&raquo;</a></li>
+      {% endif %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

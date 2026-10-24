@@ -1,0 +1,10 @@
+.env
+*.sqlite3
+__pycache__/
+.venv/
+staticfiles/
+.ruff_cache/
+.DS_Store
+*.log
+logs/
+static/app/*.apk
