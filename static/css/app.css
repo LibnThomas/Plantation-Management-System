@@ -321,3 +321,7 @@ a.cal-c:hover { transform: scale(1.08); }
 .dash-reports i { font-size: 1.25rem; color: var(--pms-green-2); }
 .dash-reports small { display: block; font-weight: 400; color: #6c7a71; font-size: .72rem; }
 @media (max-width: 575px) { .dash-reports { grid-template-columns: 1fr 1fr; } .dash-reports a { padding: .6rem; font-size: .8rem; } }
+
+/* Top bar: the estate's own name (cut short with … on small phones) */
+.brand-name { display: inline-block; max-width: 55vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+@media (min-width: 992px) { .brand-name { max-width: 40vw; } }

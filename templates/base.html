@@ -29,11 +29,10 @@
       <i class="bi bi-list fs-3"></i>
     </button>
     <a class="navbar-brand text-white fw-semibold d-flex align-items-center gap-2" href="{% url 'dashboard' %}">
-      {% if APP.logo_type %}<img class="app-logo" src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="">{% else %}<i class="bi bi-flower3"></i>{% endif %}<span class="d-none d-sm-inline">{% t "Plantation Management System" %}</span><span class="d-sm-none">PMS</span>
+      {% if APP.logo_type %}<img class="app-logo" src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="">{% else %}<i class="bi bi-flower3"></i>{% endif %}<span class="brand-name" title="{{ ESTATE_NAME|default:'' }}">{% if ESTATE_NAME %}{{ ESTATE_NAME }}{% else %}{% t "Plantation Management System" %}{% endif %}</span>
     </a>
     <div class="ms-auto d-flex align-items-center gap-2">
       {% if DEMO_MODE %}<span class="badge text-bg-warning d-none d-md-inline"><i class="bi bi-easel"></i> {% t "DEMO" %}</span>{% endif %}
-      <span class="text-white-50 small d-none d-lg-inline">{{ ESTATE_NAME }}</span>
       <form method="post" action="{% url 'core:set_language' %}" class="d-flex">{% csrf_token %}
         <input type="hidden" name="next" value="{{ request.get_full_path }}">
         <select name="language" class="form-select form-select-sm lang-select" onchange="this.form.submit()" aria-label="{% t 'Language' %}">
