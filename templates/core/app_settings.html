@@ -1,4 +1,4 @@
-{% extends "base.html" %}{% load core_tags estate_tags %}
+{% extends "base.html" %}{% load core_tags estate_tags static %}
 {% block title %}{% t "App Settings" %}{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -65,7 +65,7 @@
   <div class="col-lg-5">
     <div class="card"><div class="card-header">{% t "Preview" %}</div><div class="card-body" id="theme-preview">
       <div class="rounded p-3" data-preview="bg" style="background:{{ app.background_color }}">
-        <div class="rounded-top px-3 py-2 text-white fw-semibold" data-preview="head" style="background:{{ app.header_color }}"><i class="bi bi-flower3"></i> {{ ESTATE_NAME }}</div>
+        <div class="rounded-top px-3 py-2 text-white fw-semibold" data-preview="head" style="background:{{ app.header_color }}">{% if APP.logo_type %}<img class="app-logo" src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="">{% else %}<img class="app-logo" src="{% static 'icons/icon-96.png' %}?v={{ ASSET_V }}" alt="">{% endif %} {{ ESTATE_NAME }}</div>
         <div class="bg-white rounded-bottom p-3" data-preview="font">
           <div class="fw-semibold mb-2">{% t "Dashboard" %}</div>
           <p class="small mb-2">{% t "Workers today" %}: <strong>22 / 24</strong></p>

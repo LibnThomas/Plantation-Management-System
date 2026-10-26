@@ -32,6 +32,7 @@ FONTS = [
 NEEDS_BIDI = re.compile("[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 LIGHT = (241, 246, 243)
 GREY = (90, 100, 95)
+DEFAULT_LOGO = str(Path(__file__).resolve().parent.parent / "static" / "icons" / "icon-192.png")
 
 
 @lru_cache(maxsize=1)
@@ -96,10 +97,12 @@ def _pdf_class():
 
         def header(self):
             line = self.app.estate_name + (f"  ·  {self.report_subtitle}" if self.report_subtitle else "")
-            if self.app.logo_type:
+            # the estate's own logo, or the app icon when none is uploaded
+            logo = io.BytesIO(bytes(self.app.logo)) if self.app.logo_type else DEFAULT_LOGO
+            if logo:
                 with contextlib.suppress(Exception):  # a broken image must not stop the report
                     self.image(
-                        io.BytesIO(bytes(self.app.logo)),
+                        logo,
                         x=self.w - self.r_margin - 30,
                         y=7,
                         h=12,

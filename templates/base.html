@@ -29,7 +29,7 @@
       <i class="bi bi-list fs-3"></i>
     </button>
     <a class="navbar-brand text-white fw-semibold d-flex align-items-center gap-2" href="{% url 'dashboard' %}">
-      {% if APP.logo_type %}<img class="app-logo" src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="">{% else %}<i class="bi bi-flower3"></i>{% endif %}<span class="brand-name" title="{{ ESTATE_NAME|default:'' }}">{% if ESTATE_NAME %}{{ ESTATE_NAME }}{% else %}{% t "Plantation Management System" %}{% endif %}</span>
+      {% if APP.logo_type %}<img class="app-logo" src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="">{% else %}<img class="app-logo" src="{% static 'icons/icon-96.png' %}?v={{ ASSET_V }}" alt="">{% endif %}<span class="brand-name" title="{{ ESTATE_NAME|default:'' }}">{% if ESTATE_NAME %}{{ ESTATE_NAME }}{% else %}{% t "Plantation Management System" %}{% endif %}</span>
     </a>
     <div class="ms-auto d-flex align-items-center gap-2">
       {% if DEMO_MODE %}<span class="badge text-bg-warning d-none d-md-inline"><i class="bi bi-easel"></i> {% t "DEMO" %}</span>{% endif %}
@@ -87,7 +87,7 @@
   {% if not POPUP %}
   <aside class="offcanvas-lg offcanvas-start sidebar" tabindex="-1" id="sidebar">
     <div class="offcanvas-header d-lg-none">
-      <h5 class="offcanvas-title"><i class="bi bi-flower3"></i> {% t "Menu" %}</h5>
+      <h5 class="offcanvas-title d-flex align-items-center gap-2"><img class="app-logo" src="{% static 'icons/icon-96.png' %}?v={{ ASSET_V }}" alt=""> {% t "Menu" %}</h5>
       <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-bs-target="#sidebar"></button>
     </div>
     <div class="offcanvas-body flex-column p-0">
