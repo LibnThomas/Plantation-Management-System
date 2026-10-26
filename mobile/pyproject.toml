@@ -24,6 +24,8 @@ requires = [
     "pillow",
     "cryptography",
     "segno>=1.6",
+    # time zones: phones have no time zone database Python can read (Asia/Kolkata ...)
+    "tzdata",
 ]
 
 [tool.briefcase.app.pms_mobile.android]

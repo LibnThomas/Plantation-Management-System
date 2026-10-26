@@ -9,7 +9,42 @@ from core.i18n import ui
 from ..productivity import RefreshHarvests
 from .base import POSITIVE, TimeStampedModel, money_field, q2, qty_field
 from .lookups import AttendanceStatus, PaymentMode, PaymentStatus
-from .masters import Block, Employee, GangLeader, JobType
+from .masters import Block, Employee, GangLeader, JobType, WorkContext
+
+
+class AutoRates:
+    """Work entries and labour counts: the wage and OT rate come from the wage list (Salary Details) for the
+    entry's date, job, plot and worker, and follow it when it changes later - unless one was typed by hand
+    (different from the list), which is then kept. `wage_auto` / `ot_auto` remember which ones follow."""
+
+    WAGE_FIELD, OT_FIELD = "wage", "ot_rate"
+
+    def work_context(self):
+        raise NotImplementedError
+
+    def apply_rates(self):
+        if not self.job_type_id:
+            return
+        listed = self.job_type.wages_on(self.date, self.work_context())
+        prev = None
+        if self.pk:
+            prev = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values(self.WAGE_FIELD, self.OT_FIELD, "wage_auto", "ot_auto")
+                .first()
+            )
+        for name, flag, value in ((self.WAGE_FIELD, "wage_auto", listed[0]), (self.OT_FIELD, "ot_auto", listed[1])):
+            current = getattr(self, name)
+            follows = (
+                not current
+                or current == value
+                # unchanged since it was filled from the list: keeps following the list
+                or bool(prev and prev[flag] and current == prev[name])
+            )
+            setattr(self, flag, follows)
+            if follows:
+                setattr(self, name, value)
 
 
 class Attendance(RefreshHarvests, TimeStampedModel):
@@ -43,7 +78,7 @@ class Attendance(RefreshHarvests, TimeStampedModel):
         return f"{self.employee.full_name} - {self.date} - {self.status}"
 
 
-class WorkEntry(RefreshHarvests, TimeStampedModel):
+class WorkEntry(AutoRates, RefreshHarvests, TimeStampedModel):
     """Module 3a - Work details of one worker for one day."""
 
     date = models.DateField("Date", default=timezone.localdate)
@@ -58,6 +93,8 @@ class WorkEntry(RefreshHarvests, TimeStampedModel):
     ot_amount = money_field("Overtime amount", editable=False)
     output_quantity = qty_field("Output quantity", help_text="Optional, e.g. kg picked by this worker")
     total_amount = money_field("Total amount", editable=False)
+    wage_auto = models.BooleanField("Wage from the wage list", default=True, editable=False)
+    ot_auto = models.BooleanField("OT rate from the wage list", default=True, editable=False)
     remarks = models.TextField("Comments", blank=True)
 
     class Meta:
@@ -67,15 +104,16 @@ class WorkEntry(RefreshHarvests, TimeStampedModel):
         verbose_name_plural = "Work entries (individual)"
 
     def __str__(self):
-        return f"{self.date} - {self.employee.full_name} - {self.job_type}"
+        return f"{self.date:%d/%m/%y} - {self.employee.full_name} - {self.job_type}"
+
+    def work_context(self):
+        if self.employee_id:
+            return self.employee.work_context(self.block_id)
+        return WorkContext(block_id=self.block_id)
 
     def save(self, *args, **kwargs):
-        # a wage / OT rate typed here wins; otherwise the work type's rate in force on this date
-        if self.job_type_id and (not self.wage or not self.ot_rate):
-            emp_type = self.employee.employment_type_id if self.employee_id else None
-            wage, ot = self.job_type.wages_on(self.date, emp_type)
-            self.wage = self.wage or wage
-            self.ot_rate = self.ot_rate or ot
+        # a wage / OT rate typed here wins; otherwise the rate in force for this date, job, plot and employee
+        self.apply_rates()
         self.ot_amount = q2((self.ot_hours or 0) * (self.ot_rate or 0))
         self.total_amount = q2((self.wage or 0) + self.ot_amount)
         super().save(*args, **kwargs)
@@ -86,7 +124,7 @@ def count_field(verbose_name, **kw):
     return models.DecimalField(verbose_name, max_digits=6, decimal_places=1, default=0, validators=POSITIVE, **kw)
 
 
-class GroupWorkEntry(RefreshHarvests, TimeStampedModel):
+class GroupWorkEntry(AutoRates, RefreshHarvests, TimeStampedModel):
     """Module 3b - Daily Labour Count: day labourers who are not registered, entered only as a number
     (e.g. 10 cardamom pickers today). Payroll pays them per gang leader; registered employees are
     never part of a count (they are paid from attendance / individual work)."""
@@ -112,6 +150,9 @@ class GroupWorkEntry(RefreshHarvests, TimeStampedModel):
     wage_per_worker = money_field("Wage per worker", help_text="Filled from the work type. You can change it.")
     total_wages = money_field("Total wages", editable=False)
     ot_rate_per_hour = money_field("OT rate / hour", help_text="Filled from the work type. You can change it.")
+    wage_auto = models.BooleanField("Wage from the wage list", default=True, editable=False)
+    ot_auto = models.BooleanField("OT rate from the wage list", default=True, editable=False)
+    WAGE_FIELD, OT_FIELD = "wage_per_worker", "ot_rate_per_hour"
     ot_morning_workers = count_field("OT workers (morning)")
     ot_morning_hours = models.DecimalField(
         "OT work hours (morning)",
@@ -146,6 +187,9 @@ class GroupWorkEntry(RefreshHarvests, TimeStampedModel):
         verbose_name = "Daily labour count"
         verbose_name_plural = "Daily labour counts"
 
+    def work_context(self):
+        return WorkContext(block_id=self.block_id, is_count=True)
+
     def __str__(self):
         leader = f" ({self.gang_leader})" if self.gang_leader_id else ""
         return f"{self.date:%d/%m/%y} - {self.job_type} - {self.workers_count}{leader}"
@@ -153,10 +197,7 @@ class GroupWorkEntry(RefreshHarvests, TimeStampedModel):
     def save(self, *args, **kwargs):
         if self.male_workers or self.female_workers:
             self.workers_count = (self.male_workers or 0) + (self.female_workers or 0)
-        if self.job_type_id and (not self.wage_per_worker or not self.ot_rate_per_hour):
-            wage, ot = self.job_type.wages_on(self.date)
-            self.wage_per_worker = self.wage_per_worker or wage
-            self.ot_rate_per_hour = self.ot_rate_per_hour or ot
+        self.apply_rates()
         self.total_wages = q2(self.workers_count * (self.wage_per_worker or 0))
         self.ot_total_hours = q2(
             (self.ot_morning_workers or 0) * (self.ot_morning_hours or 0)
@@ -241,6 +282,13 @@ class SalaryPayment(TimeStampedModel):
     pay_state = models.CharField(
         "Payment", max_length=10, choices=PAY_STATES, default="unpaid", editable=False, db_index=True
     )
+    blocks = models.ManyToManyField(
+        Block,
+        verbose_name="Plots",
+        blank=True,
+        related_name="salary_payments",
+        help_text="The plots whose work this salary pays for. None: all plots",
+    )
     # Filled by Generate Payroll: one line per (source, wage, OT rate) actually used
     breakdown = models.JSONField("Calculation breakdown", default=list, blank=True, editable=False)
 
@@ -258,7 +306,19 @@ class SalaryPayment(TimeStampedModel):
         verbose_name_plural = "Salary payments"
 
     def __str__(self):
-        return f"{self.payee_name}: {self.period_from:%d/%m/%y} - {self.period_to:%d/%m/%y}"
+        # the plots only when already loaded (prefetch_related("blocks")): no extra query per row in lists
+        cached = getattr(self, "_prefetched_objects_cache", {}).get("blocks")
+        plot = f" ({', '.join(b.name for b in cached)})" if cached else ""
+        return f"{self.payee_name}{plot}: {self.period_from:%d/%m/%y} - {self.period_to:%d/%m/%y}"
+
+    @property
+    def plot_ids(self):
+        """The plots this payroll is for; empty = all plots."""
+        return {b.pk for b in self.blocks.all()} if self.pk else set()
+
+    @property
+    def plots_text(self):
+        return ", ".join(b.name for b in self.blocks.all()) if self.pk else ""
 
     @property
     def is_labour_count(self):
@@ -281,7 +341,7 @@ class SalaryPayment(TimeStampedModel):
 
     def locked_fields(self):
         """Fields that come from the payroll calculation and can't be edited by hand."""
-        return self.CALCULATED if self.breakdown else ()
+        return (*self.CALCULATED, "blocks") if self.breakdown else ()
 
     def save(self, *args, **kwargs):
         if self.breakdown:

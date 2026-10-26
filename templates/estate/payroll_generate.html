@@ -6,43 +6,152 @@
   <div class="text-muted small">{% t "Calculates pay for a period. Registered employees: from attendance and individual work details (wage and OT rate from their Individual work details for the day, else the Job type's wage for that date). Day labourers in the Daily Labour Count: count × wage per worker plus overtime, as entered each day, with one payment per gang leader." %}</div></div>
 </div>
 <div class="card mb-3"><div class="card-body">
-  <form method="post" class="row g-2 align-items-end">{% csrf_token %}
-    {% if form.non_field_errors %}<div class="col-12 alert alert-danger py-2">{{ form.non_field_errors }}</div>{% endif %}
-    {% for name in "date_from date_to employment_type job_type"|split %}{% with f=form|field:name %}
-    <div class="col-6 col-md-2"><label class="form-label small mb-0" for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{% for e in f.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}</div>
-    {% endwith %}{% endfor %}
-    <div class="col-12 col-md-auto">
-      <div class="form-check">{{ form.include_employees }} <label class="form-check-label small" for="{{ form.include_employees.id_for_label }}">{{ form.include_employees.label }}</label></div>
-      <div class="form-check">{{ form.include_counts }} <label class="form-check-label small" for="{{ form.include_counts.id_for_label }}">{{ form.include_counts.label }}</label></div>
+  <form method="post" id="genForm" class="gen-form">{% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger py-2">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="row g-3">
+      <div class="col-12 col-lg-3">
+        <label class="form-label small mb-1" for="{{ form.date_from.id_for_label }}">{% t "Period" %}</label>
+        <div class="input-group">{{ form.date_from }}<span class="input-group-text px-2">–</span>{{ form.date_to }}</div>
+        {% for f in form.date_from.errors %}<div class="text-danger small">{{ f }}</div>{% endfor %}{% for f in form.date_to.errors %}<div class="text-danger small">{{ f }}</div>{% endfor %}
+      </div>
+      <div class="col-12 col-lg-3">
+        <label class="form-label small mb-1">{{ form.employee.label }} <i class="bi bi-info-circle text-muted" title="{{ form.employee.help_text }}"></i></label>
+        <div class="dropdown emp-pick" id="empPick" data-all="{% t 'Everybody' %}">
+          <button class="form-select text-start text-truncate" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"><i class="bi bi-people me-1 text-muted"></i><span data-ep="summary">{% t "Everybody" %}</span></button>
+          <div class="dropdown-menu p-2 shadow w-100" style="min-width:300px">
+            <div class="small text-muted px-1 mb-2">{{ form.employee.help_text }}</div>
+            <input type="search" class="form-control form-control-sm mb-2" data-ep="search" placeholder="{% t 'Search…' %}">
+            <div class="d-flex justify-content-between small mb-1 px-1"><a href="#" data-ep="all">{% t "Select shown" %}</a><a href="#" data-ep="none">{% t "Clear" %}</a></div>
+            <div class="emp-pick-list">
+              <div class="emp-pick-head" data-ep-head><i class="bi bi-person-badge"></i> {% t "Employees" %}</div>
+              {% for c in form.employee %}<label class="d-flex align-items-center gap-2 py-1 small" data-ep-row>{{ c.tag }} <span>{{ c.choice_label }}</span></label>{% endfor %}
+              <div class="emp-pick-head mt-1" data-ep-head><i class="bi bi-people"></i> {% t "Gang leaders (Daily Labour Count)" %}</div>
+              {% for c in form.gang_leader %}<label class="d-flex align-items-center gap-2 py-1 small" data-ep-row>{{ c.tag }} <span>{{ c.choice_label }}</span></label>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-sm-4 col-lg-2">
+        <label class="form-label small mb-1">{{ form.blocks.label }} <i class="bi bi-info-circle text-muted" title="{{ form.blocks.help_text }}"></i></label>
+        <div class="dropdown emp-pick" id="plotPick" data-all="{% t 'All plots' %}">
+          <button class="form-select text-start text-truncate" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"><i class="bi bi-geo-alt me-1 text-muted"></i><span data-ep="summary">{% t "All plots" %}</span></button>
+          <div class="dropdown-menu p-2 shadow" style="min-width:240px">
+            <div class="small text-muted px-1 mb-2">{{ form.blocks.help_text }}</div>
+            <div class="d-flex justify-content-between small mb-1 px-1"><a href="#" data-ep="all">{% t "Select shown" %}</a><a href="#" data-ep="none">{% t "Clear" %}</a></div>
+            <div class="emp-pick-list">{% for c in form.blocks %}<label class="d-flex align-items-center gap-2 py-1 small" data-ep-row>{{ c.tag }} <span>{{ c.choice_label }}</span></label>{% empty %}<div class="small text-muted">{% t "No plots yet" %}</div>{% endfor %}</div>
+          </div>
+        </div>
+      </div>
+      {% for name in "employment_type job_type"|split %}{% with f=form|field:name %}
+      <div class="col-6 col-sm-4 col-lg-2"><label class="form-label small mb-1" for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{% for e in f.errors %}<div class="text-danger small">{{ e }}</div>{% endfor %}</div>
+      {% endwith %}{% endfor %}
     </div>
-    <div class="col-12 col-md-auto"><div class="form-check">{{ form.overwrite }} <label class="form-check-label small" for="{{ form.overwrite.id_for_label }}">{{ form.overwrite.label }}</label></div>
-      <div class="form-check">{{ form.include_pending }} <label class="form-check-label small" for="{{ form.include_pending.id_for_label }}">{{ form.include_pending.label }}</label></div></div>
-    <div class="col-12 col-md-auto d-flex gap-2">
-      <button class="btn btn-outline-primary" name="preview" value="1"><i class="bi bi-eye"></i> {% t "Preview" %}</button>
-      {% if preview %}<button class="btn btn-primary" name="confirm" value="1"><i class="bi bi-check2"></i> {% t "Create payroll" %}</button>{% endif %}
+    <div class="gen-options d-flex flex-wrap align-items-center justify-content-between gap-3 mt-3 pt-3">
+      <div class="d-flex flex-wrap gap-4">
+        <div>
+          <div class="form-check">{{ form.include_employees }} <label class="form-check-label small" for="{{ form.include_employees.id_for_label }}">{{ form.include_employees.label }}</label></div>
+          <div class="form-check">{{ form.include_counts }} <label class="form-check-label small" for="{{ form.include_counts.id_for_label }}">{{ form.include_counts.label }}</label></div>
+        </div>
+        <div>
+          <div class="form-check">{{ form.overwrite }} <label class="form-check-label small" for="{{ form.overwrite.id_for_label }}">{{ form.overwrite.label }}</label></div>
+          <div class="form-check">{{ form.include_pending }} <label class="form-check-label small" for="{{ form.include_pending.id_for_label }}">{{ form.include_pending.label }}</label></div>
+        </div>
+      </div>
+      <div class="d-flex gap-2 ms-auto">
+        <button class="btn btn-outline-primary" name="preview" value="1"><i class="bi bi-eye"></i> {% t "Preview" %}</button>
+        {% if preview %}<button class="btn btn-primary" name="confirm" value="1"><i class="bi bi-check2"></i> {% t "Create payroll for ticked" %}</button>{% endif %}
+      </div>
     </div>
   </form>
 </div></div>
 
 {% if preview %}
-<div class="card">
-  <div class="card-header d-flex justify-content-between"><span>{% t "Preview" %} · {% t "{n} payments" n=preview|length %}</span><span>{% if preview_pending %}{% t "Includes previous pending" %}: {{ CURRENCY }} {{ preview_pending|inr }} · {% endif %}{% t "Total" %}: {{ CURRENCY }} {{ preview_total|inr }}</span></div>
-  <div class="table-responsive"><table class="table table-sm table-data mb-0">
-    <thead><tr><th>{% t "Paid to" %}</th><th>{% t "Job" %}</th><th class="num">{% t "Days / man-days" %}</th><th class="num">{% t "Half days" %}</th><th class="num">{% t "Leave days" %}</th><th class="num">{% t "OT hours" %}</th><th>{% t "How it was calculated" %}</th><th class="num">{% t "Basic" %}</th><th class="num">{% t "OT amount" %}</th><th class="num">{% t "Net (before deductions)" %}</th><th class="num">{% t "Previous pending" %}</th><th class="num">{% t "Total payable" %}</th><th>{% t "Status" %}</th></tr></thead>
-    <tbody>{% for r in preview %}<tr class="{% if r.status == 'exists' %}table-secondary{% endif %}">
-      <td>{% if r.is_count %}<span class="badge text-bg-info me-1" title="{% t 'Daily labour count' %}"><i class="bi bi-people"></i></span>{% if r.leader %}{{ r.leader }}{% else %}{% t "Daily labour count (no gang leader)" %}{% endif %}{% else %}{{ r.emp.full_name }}{% endif %}</td>
-      <td>{% if r.is_count %}{% for l in r.lines %}{{ l.job }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{{ r.emp.job_type }}{% endif %}</td><td class="num">{{ r.full|num }}</td><td class="num">{{ r.half }}</td><td class="num">{{ r.leave }}</td>
+<div class="card payroll-preview">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <strong>{% t "Preview" %}</strong>
+      {% if plots %}<span class="pp-chip pp-plot"><i class="bi bi-geo-alt"></i> {% t "Plots" %}: {{ plots|join:", " }}</span>{% endif %}
+      {% if counts.new %}<span class="pp-chip pp-new">{% t "{n} new" n=counts.new %}</span>{% endif %}
+      {% if counts.update %}<span class="pp-chip pp-update">{% t "{n} to re-calculate" n=counts.update %}</span>{% endif %}
+      {% if counts.exists %}<span class="pp-chip pp-exists">{% t "{n} already exist" n=counts.exists %}</span>{% endif %}
+    </div>
+    <div class="text-end">
+      {% if preview_pending %}<span class="small text-muted me-2">{% t "Includes previous pending" %}: {{ CURRENCY }} {{ preview_pending|inr }}</span>{% endif %}
+      <span class="small text-muted">{% t "Total to create" %}</span> <strong class="fs-6">{{ CURRENCY }} {{ preview_total|inr }}</strong>
+    </div>
+  </div>
+  <div class="table-responsive"><table class="table table-sm table-data align-middle mb-0">
+    <thead><tr>
+      <th class="text-center pp-tick"><input type="checkbox" class="form-check-input" id="pickAll" title="{% t 'Select all' %}" checked><input type="hidden" name="picking" value="1" form="genForm"></th>
+      <th class="pp-name">{% t "Paid to" %}</th>
+      <th class="num">{% t "Days / man-days" %}</th>
+      <th class="num">{% t "OT hours" %}</th>
+      <th>{% t "How it was calculated" %}</th>
+      <th class="num">{% t "Basic" %}</th>
+      <th class="num">{% t "OT amount" %}</th>
+      <th class="num">{% t "Previous pending" %}</th>
+      <th class="num">{% t "Total payable" %}</th>
+      <th>{% t "Status" %}</th>
+    </tr></thead>
+    <tbody>{% for r in preview %}<tr class="pp-row pp-{{ r.status }}">
+      <td class="text-center pp-tick">{% if r.status != 'exists' %}<input type="checkbox" class="form-check-input pick-row" name="pick" value="{{ r.key }}" form="genForm" checked aria-label="{% t 'Create' %}">{% else %}<i class="bi bi-dash text-muted"></i>{% endif %}</td>
+      <td class="pp-name">
+        <div class="fw-semibold text-nowrap">{% if r.is_count %}<i class="bi bi-people text-info me-1" title="{% t 'Daily labour count' %}"></i>{% if r.leader %}{{ r.leader }}{% else %}{% t "Daily labour count (no gang leader)" %}{% endif %}{% else %}{{ r.emp.full_name }}{% endif %}</div>
+        <div class="small text-muted">{% if r.is_count %}{% t "Daily labour count" %} · {% for l in r.lines %}{{ l.job }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}{{ r.emp.job_type }}{% endif %}</div>
+      </td>
+      <td class="num"><div class="fw-semibold">{{ r.full|num }}</div>{% if r.half or r.leave %}<div class="small text-muted text-nowrap">{% if r.half %}{% t "{n} half" n=r.half %}{% endif %}{% if r.half and r.leave %} · {% endif %}{% if r.leave %}{% t "{n} leave" n=r.leave %}{% endif %}</div>{% endif %}</td>
       <td class="num">{{ r.ot|num }}</td>
       <td class="small">{% for l in r.lines %}<div class="text-nowrap">{{ l.days|num }} × {{ l.rate|inr }}{% if l.ot_hours|num != "0" %} + {{ l.ot_hours|num }} h × {{ l.ot_rate|inr }}{% endif %} <span class="badge badge-soft">{{ r.labels|get_index:forloop.counter0 }}</span></div>{% endfor %}</td>
-      <td class="num">{{ r.basic|inr }}</td><td class="num">{{ r.ot_amount|inr }}</td><td class="num">{{ r.net|inr }}</td>
-      <td class="num">{% if r.pending %}{% for o in r.pending_from %}<a class="d-block text-nowrap" href="{% url 'estate:payslip' o.pk %}" title="{{ o.period_from|date:'d/m/y' }} – {{ o.period_to|date:'d/m/y' }}">{{ o.balance|inr }}</a>{% endfor %}{% else %}–{% endif %}</td>
-      <td class="num fw-semibold">{{ r.payable|inr }}</td>
-      <td>{% if r.status == 'new' %}<span class="badge text-bg-success">{% t "New" %}</span>{% elif r.status == 'update' %}<span class="badge text-bg-warning">{% t "Re-calculate" %}</span>{% else %}<span class="badge text-bg-secondary">{% t "Already exists" %}</span>{% endif %}</td>
+      <td class="num">{{ r.basic|inr }}</td><td class="num">{{ r.ot_amount|inr }}</td>
+      <td class="num">{% if r.pending %}{% for o in r.pending_from %}<a class="d-block text-nowrap" href="{% url 'estate:payslip' o.pk %}" title="{{ o.period_from|date:'d/m/y' }} – {{ o.period_to|date:'d/m/y' }}">{{ o.balance|inr }}</a>{% endfor %}{% else %}<span class="text-muted">–</span>{% endif %}</td>
+      <td class="num fw-semibold pp-total">{{ r.payable|inr }}{% if r.pending %}<div class="small text-muted fw-normal">{% t "Net" %} {{ r.net|inr }}</div>{% endif %}</td>
+      <td class="pp-status">
+        {% if r.status == 'new' %}<span class="pp-chip pp-new"><i class="bi bi-plus-circle"></i> {% t "New" %}</span>{% elif r.status == 'update' %}<span class="pp-chip pp-update"><i class="bi bi-arrow-repeat"></i> {% if r.replaces > 1 %}{% t "Replaces {n}" n=r.replaces %}{% else %}{% t "Re-calculate" %}{% endif %}</span>{% else %}<span class="pp-chip pp-exists"><i class="bi bi-check2-circle"></i> {% t "Already exists" %}</span>
+        <div class="small text-muted mt-1">{% if r.why == 'paid' %}{% t "Paid (or payment entered): not re-calculated" %}{% else %}{% t "Tick 'Re-calculate existing unpaid payroll' to replace it" %}{% endif %}</div>{% endif %}
+        {% for p in r.existing %}<div class="pp-existing">
+          <a class="pp-open" href="{% url 'estate:update' 'salary-payments' p.pk %}" target="_blank" rel="noopener" title="{% t 'Open the payroll to check or change it' %}"><i class="bi bi-box-arrow-up-right"></i> {{ p.period_from|date:"d/m" }} – {{ p.period_to|date:"d/m/y" }}{% with t=p.plots_text %}{% if t %} · {{ t }}{% endif %}{% endwith %}</a>
+          <a class="pp-slip" href="{% url 'estate:payslip' p.pk %}" target="_blank" rel="noopener" title="{% t 'Payslip' %}"><i class="bi bi-file-earmark-text"></i></a>
+          <span class="pp-amt">{{ CURRENCY }} {{ p.net_amount|inr }}</span>{% if p.pay_state != 'unpaid' %}{{ p|cell:"pay_state" }}{% endif %}
+        </div>{% endfor %}
+      </td>
     </tr>{% endfor %}</tbody>
   </table></div>
-  <div class="card-footer bg-white small text-muted">{% t "After creating, open each payment to add bonus, advance and other deductions, then record what you pay (all or part; the rest stays pending)." %}</div>
+  <div class="card-footer small text-muted"><i class="bi bi-info-circle"></i> {% t "After creating, open each payment to add bonus, advance and other deductions, then record what you pay (all or part; the rest stays pending)." %}</div>
 </div>
 {% elif request.method == 'POST' %}
 <div class="alert alert-info">{% t "Nothing to pay for the selected period / filters (no attendance, individual work or daily labour count)." %}</div>
 {% endif %}
+<script>
+(function () {
+  "use strict";
+  // "Paid to" and "Plots": searchable tick lists in a drop-down
+  const many = "{% filter escapejs %}{% t '{n} selected' %}{% endfilter %}";
+  document.querySelectorAll(".emp-pick").forEach((box) => {
+    const q = (k) => box.querySelector(`[data-ep="${k}"]`);
+    const rows = [...box.querySelectorAll("[data-ep-row]")];
+    const summary = () => {
+      const on = rows.filter((r) => r.querySelector("input").checked);
+      q("summary").textContent = !on.length ? box.dataset.all : on.length === 1 ? on[0].textContent.trim() : many.replace("{n}", on.length);
+    };
+    if (q("search")) q("search").addEventListener("input", (e) => {
+      const t = e.target.value.trim().toLowerCase();
+      rows.forEach((r) => { r.hidden = t && !r.textContent.toLowerCase().includes(t); });
+      box.querySelectorAll("[data-ep-head]").forEach((h) => { h.hidden = !!t; });
+    });
+    q("all").addEventListener("click", (e) => { e.preventDefault(); rows.forEach((r) => { if (!r.hidden) r.querySelector("input").checked = true; }); summary(); });
+    q("none").addEventListener("click", (e) => { e.preventDefault(); rows.forEach((r) => { r.querySelector("input").checked = false; }); summary(); });
+    box.addEventListener("change", summary);
+    summary();
+  });
+  // preview: tick all / none
+  const pickAll = document.getElementById("pickAll");
+  if (pickAll) {
+    const picks = () => [...document.querySelectorAll(".pick-row")];
+    pickAll.addEventListener("change", () => picks().forEach((c) => { c.checked = pickAll.checked; }));
+    document.addEventListener("change", (e) => {
+      if (e.target.classList && e.target.classList.contains("pick-row")) pickAll.checked = picks().every((c) => c.checked);
+    });
+  }
+})();
+</script>
 {% endblock %}

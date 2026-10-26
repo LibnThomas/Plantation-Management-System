@@ -10,6 +10,7 @@ from core.models import Label
 
 from . import models as m
 from . import payroll
+from .registry import LOOKUP_MODULES
 
 
 def lookup(model, **kw):
@@ -236,10 +237,78 @@ class WageHistoryTests(Base):
             job_type=self.job, employment_type=self.other_type, effective_from=dt.date(2026, 1, 1), rate=D(700)
         )
         day = dt.date(2026, 3, 1)
-        self.assertEqual(self.job.wages_on(day, self.other_type.pk), (D(700), D(99)))  # OT 0 -> job default
-        self.assertEqual(self.job.wages_on(day, self.permanent.pk), (D(600), D(70)))
+        other, permanent = (
+            m.WorkContext(employment_type_id=self.other_type.pk),
+            m.WorkContext(employment_type_id=self.permanent.pk),
+        )
+        self.assertEqual(self.job.wages_on(day, other), (D(700), D(99)))  # OT 0 -> job default
+        self.assertEqual(self.job.wages_on(day, permanent), (D(600), D(70)))
         book = m.WageBook(day, day)
-        self.assertEqual(book.wages_on(self.job.pk, day, self.other_type.pk), (D(700), D(99)))
+        self.assertEqual(book.wages_on(self.job.pk, day, other), (D(700), D(99)))
+        count = m.GroupWorkEntry.objects.create(job_type=self.job, date=day, workers_count=2)
+        self.assertEqual(count.wage_per_worker, D(600))  # employee types never apply to labour counts
+
+    def test_rates_for_a_plot_an_employee_or_the_labour_count(self):
+        """Cardamom picking on plot Thukkupalam pays 800 from March - for employees and the labour count
+        alike; one employee gets 900 everywhere; the labour count elsewhere 550; everybody else 600."""
+        thukku = m.Block.objects.create(name="Thukkupalam")
+        other_plot = m.Block.objects.create(name="Other plot")
+        ravi = m.Employee.objects.create(full_name="Ravi", job_type=self.job, employment_type=self.permanent)
+        mar = dt.date(2026, 3, 2)
+        # entered before the rates exist: they follow the list later; one wage was typed by hand
+        e_thukku = m.WorkEntry.objects.create(employee=self.emp, job_type=self.job, date=mar, block=thukku)
+        e_typed = m.WorkEntry.objects.create(employee=self.emp, job_type=self.job, date=mar, block=thukku, wage=D(777))
+        c_thukku = m.GroupWorkEntry.objects.create(job_type=self.job, date=mar, block=thukku, workers_count=10)
+        c_other = m.GroupWorkEntry.objects.create(job_type=self.job, date=mar, block=other_plot, workers_count=10)
+        e_ravi = m.WorkEntry.objects.create(employee=ravi, job_type=self.job, date=mar, block=thukku)
+        self.assertEqual((e_thukku.wage, e_typed.wage, c_thukku.wage_per_worker), (D(600), D(777), D(600)))
+        self.assertEqual((e_typed.wage_auto, e_thukku.wage_auto), (False, True))
+
+        start = dt.date(2026, 3, 1)
+        m.WageRate.objects.create(job_type=self.job, block=thukku, effective_from=start, rate=D(800))
+        m.WageRate.objects.create(job_type=self.job, employee=ravi, effective_from=start, rate=D(900))
+        m.WageRate.objects.create(job_type=self.job, workers="count", effective_from=start, rate=D(550))
+        for x in (e_thukku, e_typed, c_thukku, c_other, e_ravi):
+            x.refresh_from_db()
+        self.assertEqual(e_thukku.wage, D(800))  # picking on Thukkupalam
+        self.assertEqual(c_thukku.wage_per_worker, D(800))  # the labour count there too (plot beats count-only)
+        self.assertEqual(c_thukku.total_wages, D(8000))
+        self.assertEqual(c_other.wage_per_worker, D(550))  # labour count elsewhere
+        self.assertEqual(e_ravi.wage, D(900))  # the employee's own rate beats the plot
+        self.assertEqual(e_typed.wage, D(777))  # typed by hand: kept
+        elsewhere = m.WorkEntry.objects.create(employee=self.emp, job_type=self.job, date=mar, block=other_plot)
+        self.assertEqual(elsewhere.wage, D(600))  # everybody else: the general rate
+        before = m.WorkEntry.objects.create(
+            employee=self.emp, job_type=self.job, date=dt.date(2026, 2, 27), block=thukku
+        )
+        self.assertEqual(before.wage, D(600))  # before the plot rate started
+
+        # payroll: an attendance-only day on the plot gets the plot rate too
+        day = dt.date(2026, 3, 3)
+        a = self.attend(day)
+        a.block = thukku
+        a.save()
+        line = payroll.calculate(self.emp, day, day)["lines"][0]
+        self.assertEqual((line["rate"], line["source"]), ("800.00", "job"))
+
+        # rates for different work may overlap; the same work may not
+        with self.assertRaises(ValidationError):
+            m.WageRate(
+                job_type=self.job,
+                block=thukku,
+                effective_from=dt.date(2026, 2, 1),
+                effective_to=dt.date(2026, 3, 5),
+                rate=D(1),
+            ).full_clean()
+        m.WageRate(job_type=self.job, block=other_plot, effective_from=start, rate=D(820)).full_clean()
+        with self.assertRaises(ValidationError):  # one employee is never in a labour count
+            m.WageRate(job_type=self.job, employee=ravi, workers="count", effective_from=start, rate=D(1)).full_clean()
+
+        # deleting the plot rate: its work goes back to the general rate
+        m.WageRate.objects.get(block=thukku).delete()
+        e_thukku.refresh_from_db()
+        c_thukku.refresh_from_db()
+        self.assertEqual((e_thukku.wage, c_thukku.wage_per_worker), (D(600), D(550)))
 
     def test_entries_use_rate_of_their_date(self):
         g25 = m.GroupWorkEntry.objects.create(job_type=self.job, date=dt.date(2025, 10, 1), workers_count=10)
@@ -524,6 +593,220 @@ class PageTests(TestCase):
         }
         return self.client.post(f"/m/salary-payments/{p.pk}/edit/", {k: v for k, v in data.items() if v is not None})
 
+    def test_generate_payroll_for_one_employee(self):
+        job = m.JobType.objects.create(name="Gen job", default_daily_wage=D(500), default_ot_rate=D(50))
+        full = lookup(m.AttendanceStatus, pay_fraction=1)
+        a = m.Employee.objects.create(full_name="Anu", job_type=job, employment_type=lookup(m.EmploymentType))
+        b = m.Employee.objects.create(full_name="Babu", job_type=job, employment_type=lookup(m.EmploymentType))
+        for emp in (a, b):
+            m.Attendance.objects.create(employee=emp, date=dt.date(2026, 9, 2), status=full)
+        m.GroupWorkEntry.objects.create(job_type=job, date=dt.date(2026, 9, 2), workers_count=5)
+        page = self.client.get(f"/m/payroll/generate/?employee={a.pk}").content.decode()
+        self.assertRegex(page, rf'name="employee" value="{a.pk}" id="[^"]+" checked')
+        data = {
+            "date_from": "01/09/26",
+            "date_to": "30/09/26",
+            "employee": a.pk,
+            "include_employees": "on",
+            "include_counts": "on",
+            "include_pending": "on",
+        }
+        preview = self.client.post("/m/payroll/generate/", {**data, "preview": "1"}).context["preview"]
+        self.assertEqual([r["emp"].pk for r in preview], [a.pk])  # only Anu, no labour count
+        self.client.post("/m/payroll/generate/", {**data, "confirm": "1"})
+        self.assertEqual(list(m.SalaryPayment.objects.values_list("employee_id", flat=True)), [a.pk])
+
+        # several employees; only the ticked rows of the preview are created
+        c = m.Employee.objects.create(full_name="Chinnu", job_type=job, employment_type=lookup(m.EmploymentType))
+        m.Attendance.objects.create(employee=c, date=dt.date(2026, 9, 3), status=full)
+        data["employee"] = [a.pk, b.pk, c.pk]
+        preview = self.client.post("/m/payroll/generate/", {**data, "preview": "1"}).context["preview"]
+        self.assertEqual({r["emp"].pk: r["status"] for r in preview}, {a.pk: "exists", b.pk: "new", c.pk: "new"})
+        anu = next(r for r in preview if r["emp"].pk == a.pk)
+        self.assertEqual([p.employee_id for p in anu["existing"]], [a.pk])
+        page = self.client.post("/m/payroll/generate/", {**data, "preview": "1"}).content.decode()
+        self.assertIn(f"/m/salary-payments/{anu['existing'][0].pk}/edit/", page)  # opens the existing payroll
+        self.client.post("/m/payroll/generate/", {**data, "confirm": "1", "picking": "1", "pick": [f"e{c.pk}"]})
+        self.assertEqual(
+            sorted(m.SalaryPayment.objects.values_list("employee_id", flat=True)), sorted([a.pk, c.pk])
+        )  # Babu was not ticked
+
+        # gang leaders: their Daily Labour Count, alone or together with employees
+        leader = m.GangLeader.objects.create(name="Murugan")
+        m.GroupWorkEntry.objects.create(job_type=job, date=dt.date(2026, 9, 4), workers_count=3, gang_leader=leader)
+        only_leader = {**data, "employee": [], "gang_leader": [str(leader.pk)], "preview": "1"}
+        preview = self.client.post("/m/payroll/generate/", only_leader).context["preview"]
+        self.assertEqual([(r["emp"], r["leader"]) for r in preview], [(None, leader)])
+        both = {**data, "employee": [b.pk], "gang_leader": [str(leader.pk), "0"], "preview": "1"}
+        preview = self.client.post("/m/payroll/generate/", both).context["preview"]
+        self.assertEqual(
+            sorted((r["emp"].pk if r["emp"] else 0, r["leader"].pk if r["leader"] else 0) for r in preview),
+            sorted([(b.pk, 0), (0, leader.pk), (0, 0)]),  # Babu, Murugan's count, the count without a leader
+        )
+
+    def test_generate_payroll_for_one_plot(self):
+        job = m.JobType.objects.create(name="Plot job", default_daily_wage=D(500), default_ot_rate=D(50))
+        full = lookup(m.AttendanceStatus, pay_fraction=1)
+        t, u = m.Block.objects.create(name="Thukkupalam"), m.Block.objects.create(name="Upper")
+        a = m.Employee.objects.create(full_name="Anu", job_type=job, employment_type=lookup(m.EmploymentType))
+        b = m.Employee.objects.create(full_name="Babu", job_type=job, employment_type=lookup(m.EmploymentType))
+        for day, blk in ((1, t), (2, t), (3, u)):
+            m.Attendance.objects.create(employee=a, date=dt.date(2026, 9, day), status=full, block=blk)
+        m.WorkEntry.objects.create(employee=b, job_type=job, date=dt.date(2026, 9, 4), block=u)
+        leader = m.GangLeader.objects.create(name="Kangani")
+        m.GroupWorkEntry.objects.create(
+            job_type=job, date=dt.date(2026, 9, 1), workers_count=4, gang_leader=leader, block=t
+        )
+        m.GroupWorkEntry.objects.create(
+            job_type=job, date=dt.date(2026, 9, 2), workers_count=6, gang_leader=leader, block=u
+        )
+        data = {
+            "date_from": "01/09/26",
+            "date_to": "30/09/26",
+            "include_employees": "on",
+            "include_counts": "on",
+            "blocks": [t.pk],
+        }
+        preview = self.client.post("/m/payroll/generate/", {**data, "preview": "1"}).context["preview"]
+        rows = {(r["emp"].pk if r["emp"] else "count"): r for r in preview}
+        self.assertEqual(set(rows), {a.pk, "count"})  # Babu worked only on the other plot
+        self.assertEqual((rows[a.pk]["full"], rows["count"]["full"]), (2, D(4)))  # Thukkupalam days / man-days
+        self.client.post("/m/payroll/generate/", {**data, "confirm": "1"})
+        self.assertEqual(
+            sorted(m.SalaryPayment.objects.values_list("blocks__name", "days_worked")),
+            sorted([("Thukkupalam", D(2)), ("Thukkupalam", D(4))]),
+        )
+        # the other plot is paid separately for the same period: no clash with Thukkupalam
+        preview = self.client.post("/m/payroll/generate/", {**data, "blocks": [u.pk], "preview": "1"}).context[
+            "preview"
+        ]
+        self.assertEqual({r["status"] for r in preview}, {"new"})
+        self.client.post("/m/payroll/generate/", {**data, "blocks": [u.pk], "confirm": "1"})
+        self.assertEqual(m.SalaryPayment.objects.filter(blocks=u).count(), 3)  # Anu, Babu, the count
+        # all plots for the same period now overlaps those payrolls: nothing paid twice
+        all_plots = {**data, "blocks": [], "preview": "1"}
+        preview = self.client.post("/m/payroll/generate/", all_plots).context["preview"]
+        self.assertEqual({r["status"] for r in preview}, {"exists"})
+        self.assertIn(
+            "Thukkupalam",
+            self.client.get(
+                f"/m/payroll/{m.SalaryPayment.objects.filter(blocks=t).first().pk}/payslip/"
+            ).content.decode(),
+        )
+        # both plots together also overlaps the single-plot payrolls
+        preview = self.client.post("/m/payroll/generate/", {**data, "blocks": [t.pk, u.pk], "preview": "1"})
+        self.assertEqual({r["status"] for r in preview.context["preview"]}, {"exists"})
+        # the payroll list filtered by a plot shows only that plot's payrolls
+        listing = self.client.get(f"/m/salary-payments/?blocks={t.pk}")
+        self.assertEqual(listing.context["count"], 2)
+        # the edit page shows the plots (fixed: they come from Generate Payroll)
+        edit = self.client.get(f"/m/salary-payments/{m.SalaryPayment.objects.filter(blocks=u).first().pk}/edit/")
+        self.assertIn('class="chip-pick"', edit.content.decode())
+
+    def test_recalculate_replaces_overlapping_unpaid_payroll(self):
+        job = m.JobType.objects.create(name="Re job", default_daily_wage=D(500), default_ot_rate=D(50))
+        full = lookup(m.AttendanceStatus, pay_fraction=1)
+        a = m.Employee.objects.create(full_name="Anu", job_type=job, employment_type=lookup(m.EmploymentType))
+        for day in (1, 10, 20):
+            m.Attendance.objects.create(employee=a, date=dt.date(2026, 9, day), status=full)
+        data = {"date_from": "01/09/26", "date_to": "15/09/26", "include_employees": "on"}
+        self.client.post("/m/payroll/generate/", {**data, "confirm": "1"})
+        first = m.SalaryPayment.objects.get()
+        self.assertEqual(first.days_worked, D(2))
+        whole = {**data, "date_to": "30/09/26"}
+        # not ticked: skipped, and the page says why
+        page = self.client.post("/m/payroll/generate/", {**whole, "preview": "1"})
+        self.assertEqual(page.context["preview"][0]["why"], "tick")
+        # ticked: the unpaid payroll of 01-15/09 is re-calculated for 01-30/09 (no second payroll)
+        self.client.post("/m/payroll/generate/", {**whole, "overwrite": "on", "confirm": "1"})
+        p = m.SalaryPayment.objects.get()
+        self.assertEqual((p.pk, p.period_to, p.days_worked), (first.pk, dt.date(2026, 9, 30), D(3)))
+        # two unpaid payrolls overlapping: one is re-used, the other replaced
+        m.SalaryPayment.objects.create(
+            employee=a,
+            period_from=dt.date(2026, 9, 25),
+            period_to=dt.date(2026, 10, 5),
+            full_days=1,
+            daily_rate=500,
+            ot_rate=1,
+            status=lookup(m.PaymentStatus, is_final=False),
+        )
+        month = {**data, "date_to": "05/10/26", "overwrite": "on"}
+        preview = self.client.post("/m/payroll/generate/", {**month, "preview": "1"}).context["preview"]
+        self.assertEqual((preview[0]["status"], preview[0]["replaces"]), ("update", 2))
+        self.client.post("/m/payroll/generate/", {**month, "confirm": "1"})
+        self.assertEqual(m.SalaryPayment.objects.count(), 1)
+        # once money is paid it is never re-calculated
+        p = m.SalaryPayment.objects.get()
+        m.SalaryPaid.objects.create(salary=p, date=dt.date(2026, 10, 6), amount=D(100))
+        preview = self.client.post("/m/payroll/generate/", {**month, "preview": "1"}).context["preview"]
+        self.assertEqual((preview[0]["status"], preview[0]["why"]), ("exists", "paid"))
+
+    def test_plot_payroll_takes_only_its_plots_pending(self):
+        job = m.JobType.objects.create(name="Pend job", default_daily_wage=D(500), default_ot_rate=D(50))
+        full = lookup(m.AttendanceStatus, pay_fraction=1)
+        t, u = m.Block.objects.create(name="T plot"), m.Block.objects.create(name="U plot")
+        a = m.Employee.objects.create(full_name="Anu", job_type=job, employment_type=lookup(m.EmploymentType))
+        status = lookup(m.PaymentStatus, is_final=False)
+        for blk, net in ((t, 1000), (u, 3000)):  # unpaid August payrolls, one per plot
+            old = m.SalaryPayment.objects.create(
+                employee=a,
+                period_from=dt.date(2026, 8, 1),
+                period_to=dt.date(2026, 8, 31),
+                full_days=D(net) / 500,
+                daily_rate=500,
+                ot_rate=1,
+                status=status,
+            )
+            old.blocks.set([blk])
+        m.Attendance.objects.create(employee=a, date=dt.date(2026, 9, 1), status=full, block=t)
+        data = {"date_from": "01/09/26", "date_to": "30/09/26", "include_employees": "on", "include_pending": "on"}
+        preview = self.client.post("/m/payroll/generate/", {**data, "blocks": [t.pk], "preview": "1"})
+        self.assertEqual(preview.context["preview"][0]["pending"], D(1000))  # only plot T's balance
+
+    def test_delete_shows_and_removes_linked_records(self):
+        p = self._payroll(D(73000))
+        m.SalaryPaid.objects.create(salary=p, date=dt.date(2026, 10, 1), amount=D(50000))
+        m.SalaryPaid.objects.create(salary=p, date=dt.date(2026, 10, 2), amount=D(10000))
+        url = f"/m/salary-payments/{p.pk}/delete/"
+        preview = self.client.get(url + "?preview=1").json()
+        self.assertTrue(preview["can_delete"])
+        paid = [g for g in preview["groups"] if g["action"] == "delete"]
+        self.assertEqual((len(paid), paid[0]["count"]), (1, 2))  # its 2 payments made
+        resp = self.client.post(url, {"next": "/m/salary-payments/"})
+        self.assertRedirects(resp, "/m/salary-payments/", fetch_redirect_response=False)
+        self.assertFalse(m.SalaryPayment.objects.filter(pk=p.pk).exists())
+        self.assertEqual(m.SalaryPaid.objects.count(), 0)
+
+        # a sale with payments received goes together with them
+        crop = m.Product.objects.create(name="Del crop")
+        sale = m.Sale.objects.create(product=crop, quantity=D(10), rate=D(100), date=dt.date(2026, 10, 1))
+        m.SaleReceipt.objects.create(sale=sale, date=dt.date(2026, 10, 2), amount=D(300))
+        self.client.post(f"/m/sales/{sale.pk}/delete/")
+        self.assertEqual((m.Sale.objects.count(), m.SaleReceipt.objects.count()), (0, 0))
+
+        # a shared list entry still in use is never deleted with business records: the pop-up says why
+        mode = lookup(m.PaymentStatus, is_final=False)
+        self._payroll(D(1000))
+        slug = next(c.slug for c in LOOKUP_MODULES if c.model is m.PaymentStatus)
+        preview = self.client.get(f"/m/{slug}/{mode.pk}/delete/?preview=1").json()
+        self.assertFalse(preview["can_delete"])
+        self.assertEqual(preview["groups"][0]["action"], "block")
+        self.client.post(f"/m/{slug}/{mode.pk}/delete/")
+        self.assertTrue(m.PaymentStatus.objects.filter(pk=mode.pk).exists())
+        self.assertEqual(m.SalaryPayment.objects.count(), 1)
+
+        # an unused list entry: links elsewhere are only emptied
+        block = m.Block.objects.create(name="Gone block")
+        h = m.Harvest.objects.create(product=crop, block=block, quantity=D(5))
+        preview = self.client.get(f"/m/blocks/{block.pk}/delete/?preview=1").json()
+        self.assertTrue(preview["can_delete"])
+        self.client.post(f"/m/blocks/{block.pk}/delete/")
+        h.refresh_from_db()
+        self.assertIsNone(h.block_id)
+        page = self.client.get(f"/m/salary-payments/{m.SalaryPayment.objects.get().pk}/delete/").content.decode()
+        self.assertIn("Yes, delete", page)
+
     def test_salary_paid_in_parts(self):
         p = self._payroll(D(73000))
         self.assertEqual((p.net_amount, p.balance, p.pay_state), (D(73000), D(73000), "unpaid"))
@@ -594,10 +877,15 @@ class PageTests(TestCase):
 
     def test_sale_received_in_parts(self):
         crop = m.Product.objects.create(name="Sale crop", unit=lookup(m.Unit))
-        base = {"date": "01/10/26", "product": crop.pk, "quantity": "100", "rate": "1000", "buyer": "Trader", "remarks": "No auction"}
-        resp = self.client.post(
-            "/m/sales/add/", {**base, "received_now": "30000", "received_date": "01/10/26"}
-        )
+        base = {
+            "date": "01/10/26",
+            "product": crop.pk,
+            "quantity": "100",
+            "rate": "1000",
+            "buyer": "Trader",
+            "remarks": "No auction",
+        }
+        resp = self.client.post("/m/sales/add/", {**base, "received_now": "30000", "received_date": "01/10/26"})
         self.assertEqual(resp.status_code, 302)
         sale = m.Sale.objects.get(product=crop)
         self.assertEqual((sale.total_amount, sale.amount_received, sale.balance), (D(100000), D(30000), D(70000)))
@@ -610,7 +898,9 @@ class PageTests(TestCase):
         self.assertEqual(resp.status_code, 200)  # before the sold date: refused
         self.client.post(edit, {**base, "received_now": "50000", "received_date": "09/10/26"})
         sale.refresh_from_db()
-        self.assertEqual((sale.balance, sale.receipt_state, sale.last_received_on), (D(0), "received", dt.date(2026, 10, 9)))
+        self.assertEqual(
+            (sale.balance, sale.receipt_state, sale.last_received_on), (D(0), "received", dt.date(2026, 10, 9))
+        )
         receipts = list(sale.receipts.order_by("date"))
         self.assertEqual([r.balance_after for r in receipts], [D(70000), D(50000), D(0)])
         self.assertEqual([r.percent for r in receipts], [D(30), D(20), D(50)])
@@ -813,3 +1103,29 @@ class DemoIsolationTests(TestCase):
         session["pms_demo"] = False
         session.save()
         self.assertIn("Real worker", self.client.get("/m/employees/").content.decode())
+
+    def test_dashboard_with_demo_data(self):
+        from .demo_data import generate
+
+        user = get_user_model().objects.create_superuser("admin", "admin@example.com", "pw")
+        with use_db(DEMO_DB):
+            generate(months=3)
+        self.client.force_login(user)
+        session = self.client.session
+        session["pms_demo"] = True
+        session.save()
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        ctx = r.context
+        self.assertGreater(ctx["active_employees"], 0)
+        self.assertTrue(ctx["recent_harvests"])
+        self.assertEqual(len(ctx["charts"]["money"]["series"]), 2)
+        self.assertEqual(len(ctx["charts"]["mandays"]["labels"]), 14)
+        html = r.content.decode()
+        for part in ("moneyChart", "mandaysChart", "/reports/analysis/?range=this_fy#costs", "/reports/builder/"):
+            self.assertIn(part, html)
+        # empty database: the dashboard still opens, with friendly empty messages
+        session["pms_demo"] = False
+        session.save()
+        html = self.client.get("/").content.decode()
+        self.assertIn("All salaries are paid.", html)

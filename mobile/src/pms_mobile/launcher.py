@@ -28,6 +28,7 @@ import sys
 import tempfile
 import threading
 import zipfile
+import zoneinfo
 from importlib import resources
 from pathlib import Path
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer
@@ -121,6 +122,9 @@ def setup_database(data_dir, progress=None):
     say = progress or (lambda text: None)
     django.setup()
     from django.conf import settings
+
+    # every page needs the estate's time zone; the phone has no time zone files - they come from `tzdata`
+    zoneinfo.ZoneInfo(settings.TIME_ZONE)  # fails here (shown on the start screen) instead of on every page
     from django.contrib.auth import get_user_model
     from django.core.management import call_command
 

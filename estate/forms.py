@@ -44,6 +44,9 @@ def style_fields(fields, small=False):
             if not isinstance(field.widget, DateInput):
                 field.widget = DateInput()
         w = field.widget
+        if isinstance(w, forms.CheckboxSelectMultiple):  # shown as toggle chips (templates)
+            w.attrs.setdefault("class", "btn-check")
+            continue
         if isinstance(w, forms.CheckboxInput):
             w.attrs.setdefault("class", "form-check-input")
         elif isinstance(w, forms.Select):
@@ -75,6 +78,14 @@ class StyledModelForm(forms.ModelForm):
             if qs is None:
                 continue
             field.empty_label = "— " + ui("choose") + " —"
+            if isinstance(field, forms.ModelMultipleChoiceField):  # e.g. a payroll's plots: tick chips
+                field.widget = forms.CheckboxSelectMultiple()
+                field.empty_label = None  # no "— choose —" chip
+                if hasattr(qs.model, "is_active"):
+                    chosen = list(getattr(self.instance, name).values_list("pk", flat=True)) if self.instance.pk else []
+                    qs = qs.filter(Q(is_active=True) | Q(pk__in=chosen))
+                field.queryset = qs  # also gives the new widget its choices
+                continue
             if hasattr(qs.model, "is_active"):
                 # only active entries, but keep the current value of an old record
                 current = getattr(self.instance, f"{name}_id", None)
@@ -120,6 +131,15 @@ class DateRangeForm(forms.Form):
 
 
 class PayrollGenerateForm(DateRangeForm):
+    employee = forms.ModelMultipleChoiceField(
+        queryset=m.Employee.objects.order_by("full_name"), required=False, widget=forms.CheckboxSelectMultiple
+    )
+    gang_leader = forms.MultipleChoiceField(required=False, widget=forms.CheckboxSelectMultiple)
+    blocks = forms.ModelMultipleChoiceField(
+        queryset=m.Block.objects.filter(is_active=True).order_by("name"),
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+    )
     employment_type = forms.ModelChoiceField(queryset=m.EmploymentType.objects.filter(is_active=True), required=False)
     job_type = forms.ModelChoiceField(queryset=m.JobType.objects.filter(is_active=True), required=False)
     include_employees = forms.BooleanField(required=False, initial=True)
@@ -129,21 +149,56 @@ class PayrollGenerateForm(DateRangeForm):
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
+        self.fields["employee"].label = ui("Paid to")
+        self.fields["employee"].help_text = ui(
+            "Employees and / or gang leaders (their Daily Labour Count). None ticked: everybody."
+        )
+        # gang leaders: the Daily Labour Count paid to them ("0" = counts entered without a gang leader)
+        self.fields["gang_leader"].choices = [(str(g.pk), str(g)) for g in m.GangLeader.objects.order_by("name")] + [
+            ("0", ui("Daily labour count (no gang leader)"))
+        ]
         self.fields["employment_type"].label = ui("Employee type")
         self.fields["job_type"].label = ui("Job / work type")
         self.fields["include_employees"].label = ui("Registered employees (attendance & individual work)")
         self.fields["include_counts"].label = ui("Daily Labour Count workers (paid per gang leader)")
         self.fields["overwrite"].label = ui("Re-calculate existing unpaid payroll for this period")
         self.fields["include_pending"].label = ui("Add earlier unpaid balances (previous pending) to this payroll")
+        self.fields["blocks"].label = ui("Plots")
+        self.fields["blocks"].help_text = ui(
+            "Only the work on the ticked plots: one payroll per employee / gang leader. None ticked: all plots."
+        )
         for name in ("employment_type", "job_type"):
             self.fields[name].empty_label = ui("All")
         style_fields(self.fields)
+        self.fields["employee"].widget.attrs = {}  # rendered by the template as a searchable check list
+        self.fields["gang_leader"].widget.attrs = {}
+        self.fields["blocks"].widget.attrs = {}
 
 
 # ---------------------------------------------------------------------------
 # Wage history rows inside the Job Type form
 # ---------------------------------------------------------------------------
-WAGE_HISTORY_FIELDS = ["effective_from", "effective_to", "rate", "ot_rate_per_hour", "employment_type", "remarks"]
+WAGE_HISTORY_FIELDS = [
+    "effective_from",
+    "effective_to",
+    "rate",
+    "ot_rate_per_hour",
+    "workers",
+    "block",
+    "employee",
+    "employment_type",
+    "remarks",
+]
+
+
+def limit_wage_scope_choices(form):
+    """Wage rate forms: active plots and employees only (but keep an old record's own choice)."""
+    for name, model in (("block", m.Block), ("employee", m.Employee)):
+        field = form.fields.get(name)
+        if field is None or not hasattr(model, "is_active"):
+            continue
+        current = getattr(form.instance, f"{name}_id", None)
+        field.queryset = model.objects.filter(Q(is_active=True) | Q(pk=current))
 
 
 class WageHistoryFormSet(BaseInlineFormSet):
@@ -160,6 +215,9 @@ class WageHistoryFormSet(BaseInlineFormSet):
         form.fields["ot_rate_per_hour"].required = False
         form.fields["ot_rate_per_hour"].widget.attrs["placeholder"] = ui("default")
         form.fields["employment_type"].empty_label = ui("All employee types")
+        form.fields["block"].empty_label = ui("All plots")
+        form.fields["employee"].empty_label = ui("Everybody")
+        limit_wage_scope_choices(form)
         style_fields(form.fields, small=True)
         return form
 
@@ -170,8 +228,10 @@ class WageHistoryFormSet(BaseInlineFormSet):
             d = getattr(f, "cleaned_data", None)
             if not d or d.get("DELETE") or not d.get("effective_from"):
                 continue
-            emp_type = d.get("employment_type")
-            rows.append((emp_type.pk if emp_type else 0, d["effective_from"], d.get("effective_to")))
+            scope = tuple(
+                (d.get(name).pk if d.get(name) else 0) for name in ("block", "employee", "employment_type")
+            ) + (d.get("workers") or "all",)
+            rows.append((scope, d["effective_from"], d.get("effective_to")))
         rows.sort(key=lambda r: (r[0], r[1]))
         for a, b in pairwise(rows):
             if a[0] != b[0]:

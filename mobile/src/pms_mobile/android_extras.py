@@ -5,6 +5,9 @@ Android only (imported on Android): what a browser does but a bare web view does
   suitable app (PDF viewer, Sheets ...). The file is fetched from the app's own server inside the phone,
   with the logged-in session.
 - Back button: goes back a page; on the first page it leaves the app as usual.
+- Keyboard: the app's screen ends at the top of the keyboard (Android only moves the whole screen up
+  otherwise, leaving a gap and hiding the field being typed in). The strip of the phone's own buttons /
+  gesture bar below the app gets the menu's white.
 """
 
 import threading
@@ -12,12 +15,14 @@ import traceback
 import urllib.request
 
 from android.content import ContentValues, Intent
+from android.graphics import Color
 from android.os import Build, Environment
 from android.provider import MediaStore
-from android.view import KeyEvent, View
+from android.view import KeyEvent, View, ViewGroup, WindowManager
 from android.webkit import CookieManager, DownloadListener, URLUtil
 from android.widget import Toast
-from java import dynamic_proxy
+from androidx.core.view import OnApplyWindowInsetsListener, ViewCompat, WindowInsetsCompat
+from java import cast, dynamic_proxy
 from java.io import File, FileOutputStream
 from java.lang import Runnable
 
@@ -107,6 +112,55 @@ class _Back(dynamic_proxy(View.OnKeyListener)):
         return False
 
 
+class _Insets(dynamic_proxy(OnApplyWindowInsetsListener)):
+    """Replaces Briefcase's listener on the app's content view: the same margins for the status bar,
+    navigation bar and camera cut-out, plus the keyboard at the bottom; keeps the status bar colour strip."""
+
+    def __init__(self, status_strip):
+        super().__init__()
+        self.status_strip = status_strip
+
+    def onApplyWindowInsets(self, view, insets):
+        try:
+            Type = WindowInsetsCompat.Type
+            bars = insets.getInsets(Type.systemBars() | Type.displayCutout())
+            ime = insets.getInsets(Type.ime())
+            lp = cast(ViewGroup.MarginLayoutParams, view.getLayoutParams())
+            lp.setMargins(bars.left, bars.top, bars.right, max(bars.bottom, ime.bottom))
+            view.setLayoutParams(lp)
+            if self.status_strip is not None:
+                slp = cast(ViewGroup.MarginLayoutParams, self.status_strip.getLayoutParams())
+                slp.height = bars.top
+                slp.setMargins(bars.left, 0, bars.right, 0)
+                self.status_strip.setLayoutParams(slp)
+        except Exception:
+            traceback.print_exc()
+        return insets
+
+
+def _fit_keyboard(app, activity):
+    content = activity.findViewById(_content_id())
+    if content is None:
+        return
+    parent = cast(ViewGroup, content.getParent())
+    strip = None
+    for i in range(parent.getChildCount()):
+        child = parent.getChildAt(i)
+        if not child.equals(content):
+            strip = child  # Briefcase's status bar colour strip
+    parent.setBackgroundColor(Color.WHITE)  # the gesture / button bar area below the app
+    activity.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+    app._pms_insets = _Insets(strip)
+    ViewCompat.setOnApplyWindowInsetsListener(content, app._pms_insets)
+    ViewCompat.requestApplyInsets(content)
+
+
+def _content_id():
+    from android import R
+
+    return R.id.content
+
+
 def install(app, webview):
     native = webview._impl.native  # android.webkit.WebView
     activity = app._impl.native  # org.beeware.android.MainActivity
@@ -117,3 +171,13 @@ def install(app, webview):
     settings = native.getSettings()
     settings.setTextZoom(100)  # the app has its own text size setting
     native.requestFocus()
+    try:
+        _fit_keyboard(app, activity)
+    except Exception:  # an older Briefcase layout: the app still works, Android pans the screen instead
+        traceback.print_exc()
+    try:  # the app has its own top bar: Android's title bar ("Plantation MS") only takes room
+        bar = activity.getSupportActionBar()
+        if bar is not None:
+            bar.hide()
+    except Exception:
+        traceback.print_exc()

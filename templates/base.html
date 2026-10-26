@@ -2,7 +2,7 @@
 <html lang="{{ CURRENT_LANG }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  {% if MOBILE_APP %}<meta name="viewport" content="width=device-width, initial-scale=1">{# the phone app fits its screen between the bars and above the keyboard itself #}{% else %}<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">{% endif %}
   <meta name="theme-color" content="{{ APP.header_color }}">
   <title>{% block title %}{% t "Plantation Management System" %}{% endblock %} · {{ ESTATE_NAME }}</title>
   <link href="{% static 'vendor/bootstrap/bootstrap.min.css' %}" rel="stylesheet">
@@ -133,11 +133,24 @@
 {% if not POPUP %}
 <nav class="bottom-nav d-lg-none">
   <a href="{% url 'dashboard' %}"><i class="bi bi-house"></i><span>{% t "Home" %}</span></a>
-  <a href="{% url 'estate:attendance_bulk' %}"><i class="bi bi-calendar-check"></i><span>{% t "Attendance" %}</span></a>
+  <a href="{% url 'estate:attendance_calendar' %}"><i class="bi bi-calendar-check"></i><span>{% t "Attendance" %}</span></a>
   <a href="{% url 'estate:create' 'harvests' %}" class="primary"><i class="bi bi-plus-lg"></i><span>{% t "Harvest" %}</span></a>
   <a href="{% url 'reports:analysis' %}"><i class="bi bi-bar-chart"></i><span>{% t "Analysis" %}</span></a>
   <a href="#" data-bs-toggle="offcanvas" data-bs-target="#sidebar"><i class="bi bi-grid"></i><span>{% t "More" %}</span></a>
 </nav>
+<script>
+  // phones: hide the bottom menu while the keyboard is open (typing, picking a date)
+  (function () {
+    const typing = (el) => el && el.matches && el.matches(
+      'input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=file]), textarea, select, [contenteditable="true"]');
+    const vv = window.visualViewport;
+    const kbUp = () => vv && window.innerHeight - vv.height > 120;
+    const update = () => document.body.classList.toggle("kb-open", typing(document.activeElement) || kbUp());
+    document.addEventListener("focusin", update);
+    document.addEventListener("focusout", () => setTimeout(update, 120));
+    if (vv) vv.addEventListener("resize", update);
+  })();
+</script>
 {% endif %}
 {% else %}
   {% block auth_content %}{% endblock %}
@@ -146,7 +159,7 @@
 <script src="{% static 'vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
 <script src="{% static 'vendor/flatpickr/flatpickr.min.js' %}"></script>
 <script src="{% static 'js/dates.js' %}?v={{ ASSET_V }}"></script>
-<script id="confirm-text" type="application/json">{"title": "{% filter escapejs %}{% t 'Delete this record?' %}{% endfilter %}", "warn": "{% filter escapejs %}{% t 'This cannot be undone.' %}{% endfilter %}", "yes": "{% filter escapejs %}{% t 'Yes, delete' %}{% endfilter %}", "cancel": "{% filter escapejs %}{% t 'Cancel' %}{% endfilter %}"}</script>
+<script id="confirm-text" type="application/json">{"title": "{% filter escapejs %}{% t 'Delete this record?' %}{% endfilter %}", "warn": "{% filter escapejs %}{% t 'This cannot be undone.' %}{% endfilter %}", "yes": "{% filter escapejs %}{% t 'Yes, delete' %}{% endfilter %}", "cancel": "{% filter escapejs %}{% t 'Cancel' %}{% endfilter %}", "yesAll": "{% filter escapejs %}{% t 'Yes, delete all' %}{% endfilter %}", "checking": "{% filter escapejs %}{% t 'Checking linked records…' %}{% endfilter %}", "alsoDelete": "{% filter escapejs %}{% t 'Also deleted:' %}{% endfilter %}", "cleared": "{% filter escapejs %}{% t 'Kept, only the link is emptied:' %}{% endfilter %}", "blocked": "{% filter escapejs %}{% t 'It cannot be deleted - still used by:' %}{% endfilter %}", "blockedHelp": "{% filter escapejs %}{% t 'Mark it inactive instead (edit it and switch off Active).' %}{% endfilter %}", "more": "{% filter escapejs %}{% t '+{n} more' %}{% endfilter %}", "close": "{% filter escapejs %}{% t 'Close' %}{% endfilter %}", "failed": "{% filter escapejs %}{% t 'Could not check the linked records.' %}{% endfilter %}"}</script>
 <script src="{% static 'js/confirm.js' %}?v={{ ASSET_V }}"></script>
 <script>
   // the phone app (installed from the APK) adds window.PMSApp; installed web apps use the service worker

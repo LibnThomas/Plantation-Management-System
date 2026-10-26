@@ -2,7 +2,7 @@ import datetime as dt
 from decimal import Decimal, InvalidOperation
 
 from django import template
-from django.utils.html import format_html
+from django.utils.html import format_html, format_html_join
 
 from core import dates
 from core.i18n import ui
@@ -74,6 +74,13 @@ STATE_BADGES = {
 def cell_value(obj, name, plain=False):
     """Display value of one field for lists, CSV and PDF."""
     field = obj._meta.get_field(name)
+    if field.many_to_many:  # e.g. a payroll's plots (prefetched by the list)
+        items = [str(x) for x in getattr(obj, name).all()]
+        if plain:
+            return ", ".join(items)
+        if not items:
+            return format_html('<span class="text-muted small">{}</span>', ui("All plots") if name == "blocks" else "")
+        return format_html_join(" ", '<span class="badge rounded-pill m2m-chip">{}</span>', ((x,) for x in items))
     if field.is_relation:
         related = getattr(obj, name)
         return "" if related is None else str(related)
@@ -146,3 +153,9 @@ def field(form, name):
 @register.filter
 def get_attr(obj, name):
     return getattr(obj, name, "")
+
+
+@register.filter
+def cell(obj, name):
+    """{{ record|cell:"pay_state" }} - a field shown as in the lists (coloured state chips, dates ...)."""
+    return cell_value(obj, name)

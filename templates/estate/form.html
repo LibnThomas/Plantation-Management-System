@@ -25,7 +25,14 @@
           {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
           <div class="row g-3">
           {% for field in form %}
-            {% if field.field.widget.input_type == 'checkbox' %}
+            {% if field.field.widget.allow_multiple_selected %}
+              <div class="col-12">
+                <div class="form-label small fw-semibold mb-1">{{ field.label }}{% if field.field.required %} <span class="text-danger">*</span>{% endif %}</div>
+                <div class="chip-pick">{% for c in field %}{{ c.tag }}<label class="btn btn-sm btn-outline-primary" for="{{ c.id_for_label }}"><i class="bi bi-check2"></i> {{ c.choice_label }}</label>{% empty %}<span class="text-muted small">–</span>{% endfor %}</div>
+                {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                {% for e in field.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+              </div>
+            {% elif field.field.widget.input_type == 'checkbox' %}
               <div class="col-12 col-md-6 d-flex align-items-end">
                 <div class="form-check form-switch">{{ field }} <label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label></div>
               </div>
@@ -44,7 +51,7 @@
             <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-2">
               <div>
                 <h2 class="h6 mb-0"><i class="bi bi-clock-history text-primary"></i> {% t "Wage history" %}</h2>
-                <div class="form-text mt-0">{% t "Which daily wage and OT rate was paid from which date to which date. Entries use the rate in force on their own date. Leave 'Date to' empty for the current rate; it closes automatically when you add a newer one." %}</div>
+                <div class="form-text mt-0">{% t "Which daily wage and OT rate was paid from which date to which date. Entries use the rate in force on their own date. Leave 'Date to' empty for the current rate; it closes automatically when you add a newer one." %} {% t "A rate can be only for one plot, one employee, one employee type, or only employees / only the Daily Labour Count: work that fits gets it, everybody else keeps the general rate." %}</div>
               </div>
               <button type="button" class="btn btn-sm btn-outline-primary" id="addRate"><i class="bi bi-plus"></i> {% t "Add wage period" %}</button>
             </div>
@@ -53,25 +60,25 @@
             <div class="table-responsive">
               <table class="table table-sm align-middle mb-0 wage-table">
                 <thead><tr>
-                  {% for name in "effective_from effective_to rate ot_rate_per_hour employment_type remarks"|split %}{% with f=history.empty_form|field:name %}<th>{{ f.label }}{% if f.field.required %} *{% endif %}</th>{% endwith %}{% endfor %}
+                  {% for name in "effective_from effective_to rate ot_rate_per_hour workers block employee employment_type remarks"|split %}{% with f=history.empty_form|field:name %}<th>{{ f.label }}{% if f.field.required %} *{% endif %}</th>{% endwith %}{% endfor %}
                   <th class="text-center">{% t "Remove" %}</th>
                 </tr></thead>
                 <tbody id="rateRows">
                 {% for f in history %}
                   <tr>
-                    {% for name in "effective_from effective_to rate ot_rate_per_hour employment_type remarks"|split %}
+                    {% for name in "effective_from effective_to rate ot_rate_per_hour workers block employee employment_type remarks"|split %}
                       {% with fld=f|field:name %}<td>{{ fld }}{% for e in fld.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}</td>{% endwith %}
                     {% endfor %}
                     <td class="text-center">{% for hf in f.hidden_fields %}{{ hf }}{% endfor %}{% if f.instance.pk %}{{ f.DELETE }}{% else %}<span class="text-muted small">{% t "new" %}</span>{% endif %}</td>
                   </tr>
-                  {% if f.non_field_errors %}<tr><td colspan="7"><div class="text-danger small">{{ f.non_field_errors|join:" " }}</div></td></tr>{% endif %}
+                  {% if f.non_field_errors %}<tr><td colspan="10"><div class="text-danger small">{{ f.non_field_errors|join:" " }}</div></td></tr>{% endif %}
                 {% endfor %}
                 </tbody>
               </table>
             </div>
             <template id="rateTemplate">
               <tr>
-                {% for name in "effective_from effective_to rate ot_rate_per_hour employment_type remarks"|split %}<td>{{ history.empty_form|field:name }}</td>{% endfor %}
+                {% for name in "effective_from effective_to rate ot_rate_per_hour workers block employee employment_type remarks"|split %}<td>{{ history.empty_form|field:name }}</td>{% endfor %}
                 <td class="text-center">{% for hf in history.empty_form.hidden_fields %}{{ hf }}{% endfor %}<span class="text-muted small">{% t "new" %}</span></td>
               </tr>
             </template>
@@ -330,21 +337,32 @@
 
   // wage / OT rate from the work type, for the entry date
   if (data.job && $("job_type")) {
-    const job = $("job_type"), date = $("date"), emp = $("employee");
+    const job = $("job_type"), date = $("date"), emp = $("employee"), block = $("block");
     const empInfo = () => (emp && data.job.employees[emp.value]) || {};
-    const rateFor = (jobId, onDate, empType) => {
+    // the same choice as the server (models.pick_rate): every filled field of a rate must fit the work;
+    // the most precise rate wins (employee > plot > employee type > employees / count only), then the newest
+    const fits = (x, w) => (!x.emp || (!w.count && x.emp === w.emp)) && (!x.block || x.block === w.block)
+      && (!x.type || (!w.count && x.type === w.type))
+      && !(x.workers === "employees" && w.count) && !(x.workers === "count" && !w.count);
+    const score = (x) => (x.emp ? 8 : 0) + (x.block ? 4 : 0) + (x.type ? 2 : 0) + (x.workers !== "all" ? 1 : 0);
+    const rateFor = (jobId, onDate, work) => {
       const j = data.job.jobs[jobId];
       if (!j) return null;
       if (onDate) {
-        const valid = j.history.filter((x) => x.from <= onDate && (!x.to || x.to >= onDate));
-        const r = (empType && valid.find((x) => x.type === empType)) || valid.find((x) => !x.type);
+        let r = null;
+        for (const x of j.history) {
+          if (x.from <= onDate && (!x.to || x.to >= onDate) && fits(x, work) && (!r || score(x) > score(r))) r = x;
+        }
         if (r) return { wage: r.wage, ot: Number(r.ot) ? r.ot : j.ot,
                         note: fill(text.history, { from: fmtDate(r.from), to: r.to ? fmtDate(r.to) : text.now }) };
       }
       return { wage: j.wage, ot: j.ot, note: text.nohist };
     };
+    const toId = (el) => (el && el.value ? Number(el.value) : null);
     const apply = (onlyEmpty) => {
-      const r = rateFor(job.value, date && window.pmsDate ? window.pmsDate.toISO(date.value) || null : null, empInfo().type);
+      const work = { count: !!data.job.is_count, emp: data.job.is_count ? null : toId(emp),
+                     type: empInfo().type || null, block: toId(block) };
+      const r = rateFor(job.value, date && window.pmsDate ? window.pmsDate.toISO(date.value) || null : null, work);
       if (!r) return;
       for (const [field, key] of Object.entries(data.job.fields)) {
         const el = $(field);
@@ -358,6 +376,7 @@
     });
     job.addEventListener("change", () => apply(false));
     if (date) date.addEventListener("change", () => apply(false));
+    if (block) block.addEventListener("change", () => apply(false));  // a plot can have its own wage
     apply(true);
   }
 
@@ -644,6 +663,37 @@
     total.value = i + 1;
     const first = document.getElementById(`id_rates-${i}-effective_from`);
     if (first) first.focus();
+  });
+
+  // wage rates: a rate for one employee has no employee type and is never for the Daily Labour Count;
+  // a Daily-Labour-Count-only rate has no employee / employee type (they have no names)
+  const wageScope = (prefix) => {
+    const get = (n) => document.getElementById(`id_${prefix}${n}`);
+    const emp = get("employee"), type = get("employment_type"), workers = get("workers");
+    if (!emp || !workers) return;
+    const countOnly = workers.value === "count", oneEmp = !!emp.value;
+    if (oneEmp && type) type.value = "";
+    if (type) type.disabled = oneEmp || countOnly;
+    emp.disabled = countOnly;
+    if (countOnly) emp.value = "";
+    const countOpt = workers.querySelector('option[value="count"]');
+    if (countOpt) countOpt.disabled = oneEmp;
+  };
+  const scopePrefix = (el) => {
+    const m = /^id_(.*?)(employee|employment_type|workers)$/.exec(el.id || "");
+    return m ? m[1] : null;
+  };
+  document.addEventListener("change", (e) => {
+    const p = scopePrefix(e.target);
+    if (p !== null) wageScope(p);
+  });
+  wageScope("");
+  document.querySelectorAll('[id$="-workers"]').forEach((el) => wageScope(scopePrefix(el)));
+  // disabled fields are not sent: enable them just before saving (they are empty anyway)
+  if (form && document.querySelector('select[id$="workers"]')) form.addEventListener("submit", () => {
+    form.querySelectorAll("select[id$='employee'], select[id$='employment_type']").forEach((el) => {
+      if (scopePrefix(el) !== null && document.getElementById(`id_${scopePrefix(el)}workers`)) el.disabled = false;
+    });
   });
 })();
 </script>

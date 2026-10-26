@@ -27,3 +27,6 @@ urlpatterns = [
 
 if settings.MOBILE_APP:  # the phone app has no web server in front: Django serves the styles / scripts itself
     urlpatterns.append(re_path(r"^static/(?P<path>.*)$", static_views.serve, {"insecure": True}))
+
+if settings.MOBILE_APP:  # the phone app: show what went wrong (only reachable from inside the phone)
+    handler500 = "core.views.mobile_server_error"

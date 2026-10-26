@@ -63,13 +63,43 @@ def date_range(request, default_days=365):
 def dashboard(request):
     today = timezone.localdate()
     month_start = today.replace(day=1)
+    prev_month_start = (month_start - dt.timedelta(days=1)).replace(day=1)
+    # last month up to the same day: a fair "so far this month" comparison
+    prev_same_day = prev_month_start.replace(day=min(today.day, 28))
     fy_start = an.year_span(today, an.fy_month())[0]
     season_start = an.year_span(today, an.season_month())[0]
     last12_start = (month_start - dt.timedelta(days=335)).replace(day=1)
+    two_weeks = today - dt.timedelta(days=13)
 
+    # --- today ---
     statuses = list(m.AttendanceStatus.objects.filter(is_active=True))
     counts = dict(m.Attendance.objects.filter(date=today).order_by().values_list("status").annotate(n=Count("id")))
     working_today = sum(n for sid, n in counts.items() if any(s.pk == sid and s.pay_fraction > 0 for s in statuses))
+    active_employees = m.Employee.objects.filter(is_active=True).count()
+    att_marked = sum(counts.values())
+    labour_today = m.GroupWorkEntry.objects.filter(date=today).aggregate(n=Sum("workers_count"))["n"] or D0
+    harvest_today = list(
+        m.Harvest.objects.filter(date=today).order_by().values("product__name").annotate(q=Sum("quantity"))
+    )
+
+    # --- money ---
+    all_rows = an.cost_rows(min(prev_month_start, fy_start, last12_start), today)
+    month_rows = [r for r in all_rows if r["date"] >= month_start]
+    _, month_cost = an.cost_summary(month_start, today, month_rows)
+    prev_cost = sum((Decimal(r["v"] or 0) for r in all_rows if prev_month_start <= r["date"] <= prev_same_day), D0)
+    month_change = (month_cost - prev_cost) * 100 / prev_cost if prev_cost else None
+    labour_month_total = sum((Decimal(r["v"] or 0) for r in month_rows if r.get("labour")), D0)
+    fy_rows = [r for r in all_rows if r["date"] >= fy_start]
+    fy_by_cat, fy_cost = an.cost_summary(fy_start, today, fy_rows)
+    fy_sales_agg = m.Sale.objects.filter(date__gte=fy_start).aggregate(t=Sum("total_amount"), r=Sum("amount_received"))
+    fy_sales = fy_sales_agg["t"] or D0
+    fy_received = fy_sales_agg["r"] or D0
+    open_sales = m.Sale.objects.filter(receipt_state__in=("pending", "part"), balance__gt=0)
+    receivable = open_sales.aggregate(t=Sum("balance"), n=Count("id"))
+    pending_salary = m.SalaryPayment.objects.filter(pay_state__in=("unpaid", "part"), balance__gt=0)
+    pending_salary_agg = pending_salary.aggregate(total=Sum("balance"), n=Count("id"))
+
+    # --- production ---
     products = {p.pk: p for p in m.Product.objects.select_related("unit")}
     season_harvest = [
         {"product": products.get(p), "q": q}
@@ -79,63 +109,99 @@ def dashboard(request):
         .order_by("-q")
     ]
     season_processed = [
-        {"product": products.get(p), "i": i, "o": o}
+        {"product": products.get(p), "i": i or D0, "o": o or D0, "pct": (o or D0) * 100 / i if i else None}
         for p, i, o in m.ProcessingBatch.objects.filter(date__gte=season_start)
         .values_list("product")
         .annotate(i=Sum("input_quantity"), o=Sum("output_quantity"))
         .order_by("-o")
     ]
-    # one set of daily cost rows covers this month, the financial year and the last 12 months
-    all_rows = an.cost_rows(min(month_start, fy_start, last12_start), today)
-    month_rows = [r for r in all_rows if r["date"] >= month_start]
-    _, month_cost = an.cost_summary(month_start, today, month_rows)
-    labour_month_total = sum((Decimal(r["v"] or 0) for r in month_rows if r.get("labour")), D0)
-    _, fy_cost = an.cost_summary(fy_start, today, [r for r in all_rows if r["date"] >= fy_start])
+
+    # --- charts ---
     prod = an.production(last12_start, today, "month")
     last12_rows = [r for r in all_rows if r["date"] >= last12_start]
     costs = an.series_by_period(last12_rows, last12_start, today, "month", series_key="cat")
+    cost_total = an.series_by_period(last12_rows, last12_start, today, "month")
+    sales_rows = [
+        {"date": d, "v": v}
+        for d, v in m.Sale.objects.filter(date__range=(last12_start, today))
+        .order_by()
+        .values_list("date")
+        .annotate(v=Sum("total_amount"))
+    ]
+    sales = an.series_by_period(sales_rows, last12_start, today, "month")
     labour_fy, _ = an.labour_cost_by_job(fy_start, today)
+    mandays = an.workforce_mandays(two_weeks, today, "day")
+
+    # --- lists ---
     due = (
         m.FieldOperation.objects.filter(
             next_due_date__range=(today - dt.timedelta(days=30), today + dt.timedelta(days=21))
         )
         .select_related("block", "agri_input__unit", "operation_type")
-        .order_by("next_due_date")[:8]
+        .order_by("next_due_date")[:6]
     )
     return render(
         request,
         "reports/dashboard.html",
         {
             "today": today,
+            "greeting": _greeting(),
             "season_start": season_start,
             "fy_start": fy_start,
-            "active_employees": m.Employee.objects.filter(is_active=True).count(),
-            "att_summary": [(s, counts.get(s.pk, 0)) for s in statuses],
+            "active_employees": active_employees,
+            "att_summary": [(s, counts.get(s.pk, 0)) for s in statuses if counts.get(s.pk)],
             "working_today": working_today,
-            "att_marked": sum(counts.values()),
+            "att_marked": att_marked,
+            "att_pct": round(working_today * 100 / active_employees) if active_employees else 0,
+            "labour_today": labour_today,
+            "harvest_today": harvest_today,
             "month_cost": month_cost,
+            "month_change": month_change,
             "labour_month_total": labour_month_total,
             "season_harvest": season_harvest,
             "season_processed": season_processed,
-            "fy_sales": m.Sale.objects.filter(date__gte=fy_start).aggregate(s=Sum("total_amount"))["s"] or 0,
+            "fy_sales": fy_sales,
+            "fy_received": fy_received,
             "fy_cost": fy_cost,
-            "pending_salary": m.SalaryPayment.objects.filter(pay_state__in=("unpaid", "part"), balance__gt=0).aggregate(
-                total=Sum("balance"), n=Count("id")
-            ),
+            "fy_profit": fy_sales - fy_cost,
+            "fy_top_costs": fy_by_cat[:5],
+            "receivable": receivable,
+            "pending_salary": pending_salary_agg,
+            "pending_salary_list": pending_salary.select_related("employee", "gang_leader").order_by("-balance")[:5],
+            "open_sales_list": open_sales.select_related("product").order_by("-balance")[:5],
             "charts": {
+                "money": {
+                    "labels": sales["labels"],
+                    "series": [
+                        {"label": ui("Sales"), "data": sales["series"][0]["data"] if sales["series"] else []},
+                        {"label": ui("Costs"), "data": cost_total["series"][0]["data"] if cost_total["series"] else []},
+                    ],
+                },
                 "prod": {"labels": prod["labels"], "series": prod["series"]},
                 "cost": {"labels": costs["labels"], "series": costs["series"]},
                 "labour": {
-                    "labels": [x["name"] for x in labour_fy[:10]],
-                    "data": _floats(x["amount"] for x in labour_fy[:10]),
+                    "labels": [x["name"] for x in labour_fy[:8]],
+                    "data": _floats(x["amount"] for x in labour_fy[:8]),
                 },
+                "mandays": {"labels": mandays["labels"], "series": mandays["series"]},
             },
             "due": due,
+            "overdue": sum(1 for o in due if o.next_due_date < today),
+            "recent_harvests": m.Harvest.objects.select_related("product__unit", "block").order_by("-date", "-id")[:5],
             "recent_ops": m.FieldOperation.objects.select_related(
                 "block", "agri_input__unit", "operation_type"
-            ).order_by("-date", "-id")[:6],
+            ).order_by("-date", "-id")[:5],
         },
     )
+
+
+def _greeting():
+    hour = timezone.localtime().hour
+    if hour < 12:
+        return ui("Good morning")
+    if hour < 17:
+        return ui("Good afternoon")
+    return ui("Good evening")
 
 
 # ---------------------------------------------------------------------------

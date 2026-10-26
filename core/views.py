@@ -344,3 +344,23 @@ def logo(request):
     resp["Cache-Control"] = "private, max-age=3600"
     resp["X-Content-Type-Options"] = "nosniff"
     return resp
+
+
+def mobile_server_error(request):
+    """Phone app only: an error page with the details to send to Mentors Soft Tech (also kept in
+    pms-errors.log in the app's data folder). Plain HTML: templates or the database may be what failed."""
+    import html
+    import sys
+    import traceback
+
+    from django.http import HttpResponseServerError
+
+    details = "".join(traceback.format_exception(*sys.exc_info())) if sys.exc_info()[0] else ""
+    return HttpResponseServerError(
+        "<!doctype html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Error</title></head><body style='font-family:system-ui,sans-serif;padding:16px'>"
+        "<h3>Something went wrong</h3><p>Go back and try again. If it happens again, take a screenshot of "
+        "this page and send it to Mentors Soft Tech.</p><p><a href='/'>Back to the app</a></p>"
+        f"<pre style='white-space:pre-wrap;font-size:11px;background:#f4f4f4;padding:10px'>{html.escape(details)}</pre>"
+        "</body></html>"
+    )

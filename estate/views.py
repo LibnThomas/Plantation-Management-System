@@ -19,8 +19,8 @@ from core.exports import csv_stream
 from core.i18n import N_, field_label, model_label, module_title, ui
 from core.pdf import new_pdf
 
+from . import deletion, payroll, productivity
 from . import models as m
-from . import payroll, productivity
 from .forms import PayrollGenerateForm, build_form_class, build_wage_history_formset, style_fields
 from .registry import BY_MODEL, LOOKUP_MODULES
 from .registry import get as get_cfg
@@ -74,7 +74,8 @@ def apply_filters(cfg, request, qs, with_widgets=False):
         selected = params.get(name, "")
         if f.is_relation:
             if selected.isdigit():
-                qs = qs.filter(**{f"{name}_id": int(selected)})
+                # many-to-many (a payroll's plots): records that include it
+                qs = qs.filter(**{f"{name}__id" if f.many_to_many else f"{name}_id": int(selected)})
             options = [(str(o.pk), str(o)) for o in related_options(f.related_model)] if with_widgets else []
         elif f.choices:
             if selected == "pending" and name == "pay_state":  # payroll: not paid + part paid
@@ -129,7 +130,10 @@ def with_related(model, names):
 
 
 def base_queryset(cfg):
-    return with_related(cfg.model, [f for f in cfg.list_fields if cfg.model._meta.get_field(f).is_relation])
+    fields = [cfg.model._meta.get_field(f) for f in cfg.list_fields]
+    qs = with_related(cfg.model, [f.name for f in fields if f.is_relation and not f.many_to_many])
+    many = [f.name for f in fields if f.many_to_many]  # e.g. a payroll's plots: one extra query per page
+    return qs.prefetch_related(*many) if many else qs
 
 
 def totals_for(cfg, qs):
@@ -241,17 +245,22 @@ def popup_payload(obj):
     if getattr(obj, "unit_id", None):
         attrs["unit"] = str(obj.unit)
     if isinstance(obj, m.JobType):
-        attrs["history"] = [
-            {
-                "from": r.effective_from.isoformat(),
-                "to": r.effective_to.isoformat() if r.effective_to else None,
-                "type": r.employment_type_id,
-                "wage": str(r.rate),
-                "ot": str(r.ot_rate_per_hour),
-            }
-            for r in obj.wage_rates.order_by("-effective_from")
-        ]
+        attrs["history"] = [_rate_row(r) for r in obj.wage_rates.order_by("-effective_from", "-id")]
     return {"type": "pms-added", "id": str(obj.pk), "label": str(obj), "attrs": attrs}
+
+
+def _rate_row(r):
+    """One wage period for the form's rate auto-fill (same choice as models.pick_rate)."""
+    return {
+        "from": r.effective_from.isoformat(),
+        "to": r.effective_to.isoformat() if r.effective_to else None,
+        "type": r.employment_type_id,
+        "block": r.block_id,
+        "emp": r.employee_id,
+        "workers": r.workers,
+        "wage": str(r.rate),
+        "ot": str(r.ot_rate_per_hour),
+    }
 
 
 def _form_context_data(cfg, FormClass):
@@ -259,18 +268,11 @@ def _form_context_data(cfg, FormClass):
     data = {}
     if cfg.job_defaults:
         history = {}
-        for r in m.WageRate.objects.order_by("-effective_from"):
-            history.setdefault(str(r.job_type_id), []).append(
-                {
-                    "from": r.effective_from.isoformat(),
-                    "to": r.effective_to.isoformat() if r.effective_to else None,
-                    "type": r.employment_type_id,
-                    "wage": str(r.rate),
-                    "ot": str(r.ot_rate_per_hour),
-                }
-            )
+        for r in m.WageRate.objects.order_by("-effective_from", "-id"):
+            history.setdefault(str(r.job_type_id), []).append(_rate_row(r))
         data["job"] = {
             "fields": cfg.job_defaults,
+            "is_count": cfg.model is m.GroupWorkEntry,  # Daily Labour Count: rates for counts apply
             "employees": (
                 {
                     str(pk): {"job": str(job), "type": emp_type}
@@ -449,9 +451,7 @@ def crud_form(request, slug, pk=None):
                 else "Payment of {amount} saved as Pending (not paid) - it is not counted as paid. "
                 "Balance (pending): {balance}."
             )
-            messages.info(
-                request, ui(text, amount=inr(form.cleaned_data["current_payment"]), balance=inr(obj.balance))
-            )
+            messages.info(request, ui(text, amount=inr(form.cleaned_data["current_payment"]), balance=inr(obj.balance)))
         if receiving and form.cleaned_data.get("received_now"):
             obj.refresh_from_db()
             messages.info(
@@ -643,12 +643,27 @@ def crud_delete(request, slug, pk):
     if denied := _edit_denied(request, cfg):
         return denied
     obj = get_object_or_404(cfg.model, pk=pk)
+    plan = deletion.Plan(obj)
+    if request.GET.get("preview") == "1":  # the delete pop-up: what else this delete affects
+        return JsonResponse(plan.as_json())
     if request.method == "POST":
-        try:
-            obj.delete()
-            messages.success(request, ui("Deleted: {name}", name=model_label(cfg.model)))
-        except ProtectedError:
-            messages.error(request, ui("Cannot delete: other records use this entry. Mark it inactive instead."))
+        if plan.can_delete:
+            try:
+                plan.execute()
+                also = sum(g["count"] for (_, action), g in plan.groups.items() if action == "delete")
+                text = "Deleted: {name}" + (" (and {n} linked records)" if also else "")
+                messages.success(request, ui(text, name=model_label(cfg.model), n=also))
+            except (ProtectedError, ValidationError) as e:
+                messages.error(
+                    request, ui("Could not delete: {error}", error=" ".join(getattr(e, "messages", [str(e)])))
+                )
+        else:
+            messages.error(
+                request,
+                ui(
+                    "{name} is still used by other records, so it can't be deleted. Mark it inactive instead.", name=obj
+                ),
+            )
         nxt = request.POST.get("next", "")
         # the deleted record's own pages are gone: go to the list instead
         own_page = f"/{slug}/{pk}/" in nxt or (cfg.model is m.SalaryPaid and f"/payment/{pk}/" in nxt)
@@ -656,7 +671,9 @@ def crud_delete(request, slug, pk):
             return redirect(nxt)
         return redirect("estate:list", slug=slug)
     return render(
-        request, "estate/confirm_delete.html", {"cfg": cfg, "obj": obj, "record_name": model_label(cfg.model)}
+        request,
+        "estate/confirm_delete.html",
+        {"cfg": cfg, "obj": obj, "record_name": model_label(cfg.model), "impact": plan.as_json()},
     )
 
 
@@ -929,7 +946,12 @@ def attendance_bulk(request):
 @login_required
 def payroll_generate(request):
     today = timezone.localdate()
-    form = PayrollGenerateForm(request.POST or None, initial={"date_from": today.replace(day=1), "date_to": today})
+    initial = {"date_from": today.replace(day=1), "date_to": today}
+    if request.GET.get("employee", "").isdigit():  # opened from an employee's page
+        initial["employee"] = [int(request.GET["employee"])]
+    if request.GET.get("gang_leader", "").isdigit():
+        initial["gang_leader"] = [request.GET["gang_leader"]]
+    form = PayrollGenerateForm(request.POST or None, initial=initial)
     preview = []
     if request.method == "POST" and form.is_valid():
         d1, d2 = form.cleaned_data["date_from"], form.cleaned_data["date_to"]
@@ -943,16 +965,24 @@ def payroll_generate(request):
             )
             commit = False
 
+        blocks = list(form.cleaned_data["blocks"])
+        block_ids = {b.pk for b in blocks}  # empty: all plots
+
         def row_status(existing):
-            same = next((p for p in existing if (p.period_from, p.period_to) == (d1, d2)), None)
-            if (
-                any(p.is_locked for p in existing)
-                or (existing and not form.cleaned_data["overwrite"])
-                or (existing and not same)
-                or len(existing) > 1
-            ):
-                return "exists", None  # paid, not allowed to overwrite, or other overlapping periods
-            return ("update", same) if existing else ("new", None)
+            """(state, payroll to re-use, why it is skipped). With "Re-calculate existing unpaid payroll"
+            ticked, unpaid payrolls overlapping the period and plots are replaced by the new calculation
+            (one is re-used, the others deleted) - also when their dates or plots differ."""
+            if not existing:
+                return "new", None, ""
+            if any(p.is_locked or p.payments.exists() for p in existing):
+                return "exists", None, "paid"  # money paid / entered or balance moved on: never re-calculated
+            if not form.cleaned_data["overwrite"]:
+                return "exists", None, "tick"
+            same = next(
+                (p for p in existing if (p.period_from, p.period_to) == (d1, d2) and p.plot_ids == block_ids),
+                existing[0],
+            )
+            return "update", same, ""
 
         # unpaid balances of earlier payrolls, per payee: added as "previous pending" when ticked
         pending = {}
@@ -960,19 +990,34 @@ def payroll_generate(request):
             for old in (
                 m.SalaryPayment.objects.filter(pay_state__in=("unpaid", "part"), balance__gt=0, period_to__lt=d1)
                 .select_related("status")
+                .prefetch_related("blocks")
                 .order_by("period_to", "id")
             ):
+                # a payroll for some plots only takes over balances of the same plots (not other plots',
+                # nor all-plots ones); a payroll for all plots takes over every earlier balance
+                if block_ids and not (old.plot_ids and old.plot_ids <= block_ids):
+                    continue
                 key = ("e", old.employee_id) if old.employee_id else ("g", old.gang_leader_id)
                 pending.setdefault(key, []).append(old)
 
         rows = []  # (calc, employee, gang leader id, existing payments)
-        if form.cleaned_data["include_employees"]:
-            # everyone employed during the period, including those who left in it
-            emps = (
-                m.Employee.objects.filter(date_of_joining__lte=d2)
-                .filter(Q(date_of_leaving__isnull=True) | Q(date_of_leaving__gte=d1))
-                .select_related("job_type")
+        # "Paid to": ticked employees and / or gang leaders; nothing ticked = everybody
+        picked_emps = form.cleaned_data["employee"]
+        picked_leaders = {int(x) for x in form.cleaned_data["gang_leader"]}
+        picking_people = bool(picked_emps or picked_leaders)
+        if form.cleaned_data["include_employees"] and (picked_emps or not picking_people):
+            # everyone with attendance or individual work in the period (also those registered later than
+            # their first work day, and those who left during it)
+            att_qs = m.Attendance.objects.filter(date__range=(d1, d2))
+            work_qs = m.WorkEntry.objects.filter(date__range=(d1, d2))
+            if block_ids:  # who worked on the plots (calculate() keeps only those days)
+                att_qs, work_qs = att_qs.filter(block_id__in=block_ids), work_qs.filter(block_id__in=block_ids)
+            worked = set(att_qs.values_list("employee_id", flat=True)) | set(
+                work_qs.values_list("employee_id", flat=True)
             )
+            emps = m.Employee.objects.filter(pk__in=worked).select_related("job_type")
+            if picked_emps:  # only the chosen employees' payroll for the period
+                emps = emps.filter(pk__in=[e.pk for e in picked_emps])
             if form.cleaned_data["employment_type"]:
                 emps = emps.filter(employment_type=form.cleaned_data["employment_type"])
             if job_type:
@@ -982,24 +1027,32 @@ def payroll_generate(request):
             for p in (
                 m.SalaryPayment.objects.filter(employee__in=emps, period_from__lte=d2, period_to__gte=d1)
                 .select_related("status")
+                .prefetch_related("blocks")
                 .order_by("id")
             ):
-                existing_by_emp.setdefault(p.employee_id, []).append(p)
+                if payroll.plots_overlap(p.plot_ids, block_ids):  # payrolls for other plots don't count
+                    existing_by_emp.setdefault(p.employee_id, []).append(p)
             for emp in emps:
-                calc = payroll.calculate(emp, d1, d2, ctx)
+                calc = payroll.calculate(emp, d1, d2, ctx, block_ids=block_ids)
                 if calc:
                     rows.append((calc, emp, None, existing_by_emp.get(emp.pk, [])))
-        # day labourers have no employee type, so they are left out when one is chosen
-        if form.cleaned_data["include_counts"] and not form.cleaned_data["employment_type"]:
+        # day labourers (paid per gang leader) have no employee type, so they are left out when one is chosen
+        with_counts = form.cleaned_data["include_counts"] and not form.cleaned_data["employment_type"]
+        if with_counts and (picked_leaders or not picking_people):
             leaders = {g.pk: g for g in m.GangLeader.objects.all()}
-            for leader_id, calc in payroll.calculate_counts(d1, d2, job_type).items():
-                existing = list(payroll.existing_count_payments(d1, d2, leader_id).select_related("status"))
+            for leader_id, calc in payroll.calculate_counts(d1, d2, job_type, block_ids=block_ids).items():
+                if picked_leaders and (leader_id or 0) not in picked_leaders:
+                    continue
+                existing = payroll.existing_count_payments(d1, d2, leader_id, block_ids)
                 rows.append((calc, None, leaders.get(leader_id), existing))
 
+        # the preview's tick boxes: only the ticked rows are created (all of them when none were shown yet)
+        picked = set(request.POST.getlist("pick")) if "picking" in request.POST else None
         created = updated = skipped = 0
         with transaction.atomic():
             for calc, emp, leader, existing in rows:
-                state, same_period = row_status(existing)
+                state, same_period, why = row_status(existing)
+                key = f"e{emp.pk}" if emp else f"g{leader.pk if leader else 0}"
                 earlier = pending.get(("e", emp.pk) if emp else ("g", leader.pk if leader else None), [])
                 if state == "exists":
                     earlier = []
@@ -1014,6 +1067,10 @@ def payroll_generate(request):
                         "leader": leader,
                         "is_count": emp is None,
                         "status": state,
+                        "why": why,
+                        "replaces": len(existing) if state == "update" else 0,
+                        "key": key,
+                        "existing": existing,  # links to the payroll already made for the period
                         "labels": [
                             payroll.source_label(x["source"]) + (f" · {x['job']}" if x.get("job") else "")
                             for x in calc["lines"]
@@ -1022,9 +1079,23 @@ def payroll_generate(request):
                 )
                 if not commit:
                     continue
-                if state == "exists":
+                if state == "exists" or (picked is not None and key not in picked):
                     skipped += 1
                     continue
+                if state == "update":
+                    # the other overlapping unpaid payrolls are replaced by this one; balances that had been
+                    # moved into them become pending again where they came from, and are taken over below
+                    for extra in existing:
+                        if extra.pk == same_period.pk:
+                            continue
+                        returned = list(extra.carried_from.all())
+                        extra.delete()
+                        if form.cleaned_data["include_pending"]:
+                            for old in returned:
+                                old.refresh_from_db()
+                                if old.balance > 0 and old not in earlier:
+                                    earlier = [*earlier, old]
+                    earlier_total = sum((o.balance for o in earlier), Decimal(0))
                 saved = payroll.save(
                     emp,
                     d1,
@@ -1033,6 +1104,7 @@ def payroll_generate(request):
                     user=request.user,
                     status=status,
                     gang_leader=leader,
+                    blocks=blocks,
                     payment=same_period if state == "update" else None,
                 )
                 if earlier:  # move the earlier balances into this payroll; they are paid here now
@@ -1046,7 +1118,7 @@ def payroll_generate(request):
                     created += 1
         if commit:
             msg = N_(
-                "Payroll generated: {created} created, {updated} re-calculated, {skipped} skipped (already exist or paid)."  # noqa: E501
+                "Payroll generated: {created} created, {updated} re-calculated, {skipped} skipped (already exist, paid or not ticked)."  # noqa: E501
             )
             messages.success(request, ui(msg, created=created, updated=updated, skipped=skipped))
             return redirect(f"{reverse('estate:list', args=['salary-payments'])}?date_from={d1}&date_to={d2}")
@@ -1058,6 +1130,8 @@ def payroll_generate(request):
             "preview": preview,
             "preview_total": sum((r["payable"] for r in preview if r["status"] != "exists"), Decimal(0)),
             "preview_pending": sum((r["pending"] for r in preview), Decimal(0)),
+            "counts": {k: sum(1 for r in preview if r["status"] == k) for k in ("new", "update", "exists")},
+            "plots": list(form.cleaned_data.get("blocks") or []) if form.is_bound and form.is_valid() else [],
         },
     )
 
@@ -1141,6 +1215,7 @@ def payslip_pdf(request, pk):
             [
                 (field_label(sp, "gang_leader"), p.payee_name),
                 (ui("Daily labour count"), jobs),
+                (ui("Plots"), p.plots_text or ui("All plots")),
                 (field_label(sp, "net_amount"), inr(p.net_amount)),
             ]
         )
@@ -1149,7 +1224,10 @@ def payslip_pdf(request, pk):
         pdf.kpis(
             [
                 (field_label(sp, "employee"), f"{p.employee.full_name} ({p.employee.employee_code})"),
-                (field_label(m.Employee, "job_type"), str(p.employee.job_type)),
+                (
+                    field_label(m.Employee, "job_type"),
+                    str(p.employee.job_type) + (f" · {p.block}" if p.block_id else ""),
+                ),
                 (field_label(sp, "net_amount"), inr(p.net_amount)),
             ]
         )

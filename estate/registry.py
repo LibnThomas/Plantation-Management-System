@@ -164,6 +164,9 @@ MODULES = [
         group="Salary",
         list_fields=[
             "job_type",
+            "workers",
+            "block",
+            "employee",
             "employment_type",
             "rate",
             "ot_rate_per_hour",
@@ -171,10 +174,14 @@ MODULES = [
             "effective_to",
             "remarks",
         ],
-        search_fields=["remarks", "job_type__name"],
-        filter_fields=["job_type", "employment_type"],
+        search_fields=["remarks", "job_type__name", "employee__full_name", "block__name"],
+        filter_fields=["job_type", "workers", "block", "employee", "employment_type"],
         date_field="effective_from",
-        help_text="Wage of each job type from a date to a date. Tip: edit them inside each Job Type.",
+        help_text="Wage of each job type from a date to a date - for everybody, or only for one plot, one "
+        "employee, one employee type, or only registered employees / the Daily Labour Count (e.g. cardamom "
+        "picking on plot Thukkupalam). Work that fits gets the most precise rate; everybody else the general "
+        "one. Work already entered in the period is updated (wages typed by hand are kept). "
+        "Tip: edit them inside each Job Type.",
         staff_edit=True,
     ),
     ModuleConfig(
@@ -186,6 +193,7 @@ MODULES = [
         list_fields=[
             "employee",
             "gang_leader",
+            "blocks",
             "period_from",
             "period_to",
             "days_worked",
@@ -202,7 +210,7 @@ MODULES = [
             "payment_date",
         ],
         search_fields=["employee__full_name", "gang_leader__name", "remarks"],
-        filter_fields=["pay_state", "employee", "gang_leader", "status", "payment_mode"],
+        filter_fields=["pay_state", "employee", "gang_leader", "blocks", "status", "payment_mode"],
         date_field="period_to",
         sum_fields=[
             "days_worked",

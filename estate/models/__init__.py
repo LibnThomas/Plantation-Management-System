@@ -25,6 +25,7 @@ from .lookups import (  # noqa: F401
     Unit,
 )
 from .masters import (  # noqa: F401
+    WAGE_WORKERS,
     AgriInput,
     Block,
     Employee,
@@ -33,8 +34,10 @@ from .masters import (  # noqa: F401
     Product,
     WageBook,
     WageRate,
+    WorkContext,
     close_open_rates,
     pick_rate,
+    reapply_rates,
     wage_rate_on,
 )
 from .operations import Expense, FieldOperation, Harvest, ProcessingBatch, Sale, SaleReceipt, SavedReport  # noqa: F401

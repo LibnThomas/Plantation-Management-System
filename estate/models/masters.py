@@ -30,12 +30,13 @@ class JobType(LocalizedNameMixin, TimeStampedModel):
         verbose_name = "Job type"
         verbose_name_plural = "Job types"
 
-    def rate_on(self, on_date, employment_type_id=None):
-        return wage_rate_on(self.pk, on_date, employment_type_id)
+    def rate_on(self, on_date, ctx=None):
+        return wage_rate_on(self.pk, on_date, ctx)
 
-    def wages_on(self, on_date, employment_type_id=None):
-        """(daily wage, OT rate / hour) on a date: wage history first, else the defaults."""
-        return self.wages_from(self.rate_on(on_date, employment_type_id))
+    def wages_on(self, on_date, ctx=None):
+        """(daily wage, OT rate / hour) on a date for some work (see WorkContext): wage history first, else
+        the defaults."""
+        return self.wages_from(self.rate_on(on_date, ctx))
 
     def wages_from(self, rate):
         if rate:
@@ -190,9 +191,12 @@ class Employee(TimeStampedModel):
     def __str__(self):
         return f"{self.full_name} ({self.employee_code})"
 
-    def wages_on(self, on_date, job_type=None):
+    def work_context(self, block_id=None):
+        return WorkContext(employee_id=self.pk, employment_type_id=self.employment_type_id, block_id=block_id)
+
+    def wages_on(self, on_date, job_type=None, block_id=None):
         """(daily wage, OT rate) on a date for this employee's (or the given) job type."""
-        return (job_type or self.job_type).wages_on(on_date, self.employment_type_id)
+        return (job_type or self.job_type).wages_on(on_date, self.work_context(block_id))
 
     def save(self, *args, **kwargs):
         if not self.employee_code:
@@ -210,17 +214,61 @@ class Employee(TimeStampedModel):
 # ---------------------------------------------------------------------------
 # Wage history
 # ---------------------------------------------------------------------------
-def pick_rate(rates, on_date, employment_type_id=None):
+WAGE_WORKERS = [
+    ("all", "Everybody (employees + labour count)"),
+    ("employees", "Employees only"),
+    ("count", "Daily Labour Count only"),
+]
+
+
+class WorkContext:
+    """Who did the work, for choosing the wage rate: a registered employee (with their employee type)
+    or the Daily Labour Count, on which plot."""
+
+    __slots__ = ("employee_id", "employment_type_id", "block_id", "is_count")
+
+    def __init__(self, employee_id=None, employment_type_id=None, block_id=None, is_count=False):
+        self.employee_id, self.employment_type_id = employee_id, employment_type_id
+        self.block_id, self.is_count = block_id, is_count
+
+
+def rate_fits(r, ctx):
+    """Does wage rate `r` apply to this work? Every field filled on the rate must match."""
+    if r.employee_id and (ctx.is_count or r.employee_id != ctx.employee_id):
+        return False
+    if r.block_id and r.block_id != ctx.block_id:
+        return False
+    if r.employment_type_id and (ctx.is_count or r.employment_type_id != ctx.employment_type_id):
+        return False
+    if r.workers == "employees" and ctx.is_count:
+        return False
+    return not (r.workers == "count" and not ctx.is_count)
+
+
+def rate_score(r):
+    """More precise rates win: one employee > plot > employee type > employees-only / count-only > all."""
+    return (
+        (8 if r.employee_id else 0)
+        + (4 if r.block_id else 0)
+        + (2 if r.employment_type_id else 0)
+        + (1 if r.workers != "all" else 0)
+    )
+
+
+def pick_rate(rates, on_date, ctx=None):
     """
-    The rate valid on a date from `rates` (one job type, newest first). A rate for the employee's
-    own type wins over an "all employee types" rate.
+    The rate for one piece of work from `rates` (one job type, newest first): valid on the date, every
+    filled field matching (see rate_fits), the most precise one (see rate_score); for equally precise
+    rates the newest. None: the job type's default wage.
     """
-    valid = [r for r in rates if r.effective_from <= on_date and (r.effective_to is None or r.effective_to >= on_date)]
-    if employment_type_id:
-        for r in valid:
-            if r.employment_type_id == employment_type_id:
-                return r
-    return next((r for r in valid if r.employment_type_id is None), None)
+    ctx = ctx or WorkContext()
+    best, best_score = None, -1
+    for r in rates:
+        if r.effective_from <= on_date and (r.effective_to is None or r.effective_to >= on_date) and rate_fits(r, ctx):
+            score = rate_score(r)
+            if score > best_score:  # rates come newest first: a tie keeps the newer one
+                best, best_score = r, score
+    return best
 
 
 def _rates_between(d1, d2):
@@ -231,11 +279,11 @@ def _rates_between(d1, d2):
     )
 
 
-def wage_rate_on(job_type_id, on_date, employment_type_id=None):
-    """Wage rate of a job type valid on a date (see pick_rate)."""
+def wage_rate_on(job_type_id, on_date, ctx=None):
+    """Wage rate of a job type for one piece of work on a date (see pick_rate)."""
     if not job_type_id or not on_date:
         return None
-    return pick_rate(_rates_between(on_date, on_date).filter(job_type_id=job_type_id), on_date, employment_type_id)
+    return pick_rate(_rates_between(on_date, on_date).filter(job_type_id=job_type_id), on_date, ctx)
 
 
 class WageBook:
@@ -247,28 +295,57 @@ class WageBook:
         for r in _rates_between(d1, d2):
             self.rates.setdefault(r.job_type_id, []).append(r)
 
-    def wages_on(self, job_type_id, on_date, employment_type_id=None):
+    def wages_on(self, job_type_id, on_date, ctx=None):
         job = self.jobs[job_type_id]
-        return job.wages_from(pick_rate(self.rates.get(job_type_id, ()), on_date, employment_type_id))
+        return job.wages_from(pick_rate(self.rates.get(job_type_id, ()), on_date, ctx))
 
 
 class WageRate(TimeStampedModel):
-    """Module 4 - Salary details: wage of a job type (optionally for one employee type) from a date to a date."""
+    """Salary details: the daily wage and OT rate of a job type from a date to a date - for everybody, or
+    only for one plot, one employee, one employee type, or only registered employees / the Daily Labour
+    Count. Work gets the most precise rate that fits it (see pick_rate); the rest keep the general one."""
 
     job_type = models.ForeignKey(JobType, verbose_name="Job type", on_delete=models.CASCADE, related_name="wage_rates")
+    block = models.ForeignKey(
+        Block,
+        verbose_name="Plot",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="wage_rates",
+        help_text="Only for work on this plot. Leave blank for all plots",
+    )
+    employee = models.ForeignKey(
+        Employee,
+        verbose_name="Employee",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="wage_rates",
+        help_text="Only for this employee. Leave blank for everybody",
+    )
     employment_type = models.ForeignKey(
         EmploymentType,
-        verbose_name="Applies to",
+        verbose_name="Employee type",
         null=True,
         blank=True,
         on_delete=models.PROTECT,
         help_text="Leave blank for all employee types",
+    )
+    workers = models.CharField(
+        "Applies to",
+        max_length=10,
+        choices=WAGE_WORKERS,
+        default="all",
+        help_text="Registered employees, the Daily Labour Count, or both",
     )
     rate = money_field("Daily wage")
     ot_rate_per_hour = money_field("OT rate / hour", help_text="0 = use the job type's default OT rate")
     effective_from = models.DateField("Date from", default=timezone.localdate)
     effective_to = models.DateField("Date to", null=True, blank=True, help_text="Leave blank if still in force")
     remarks = models.CharField("Remarks", max_length=200, blank=True, help_text="e.g. As per wage agreement 2026")
+
+    SCOPE = ("job_type_id", "block_id", "employee_id", "employment_type_id", "workers")
 
     class Meta:
         ordering = ["-effective_from", "job_type__name"]
@@ -278,11 +355,31 @@ class WageRate(TimeStampedModel):
 
     def __str__(self):
         to = f"{self.effective_to:%d/%m/%y}" if self.effective_to else "…"
-        return f"{self.job_type}: {self.rate} ({self.effective_from:%d/%m/%y} - {to})"
+        only = [str(x) for x in (self.employee, self.block, self.employment_type) if x is not None]
+        if self.workers != "all":
+            only.append(str(self.get_workers_display()))
+        only = f" [{', '.join(only)}]" if only else ""
+        return f"{self.job_type}{only}: {self.rate} ({self.effective_from:%d/%m/%y} - {to})"
+
+    def scope_key(self):
+        return tuple(getattr(self, name) for name in self.SCOPE)
+
+    def _same_scope(self):
+        return WageRate.objects.filter(**{name.removesuffix("_id"): getattr(self, name) for name in self.SCOPE})
 
     def clean(self):
         if self.effective_to and self.effective_from and self.effective_to < self.effective_from:
             raise ValidationError({"effective_to": "'Date to' must be after 'Date from'."})
+        if self.employee_id:  # one employee: their type doesn't matter, and they are never in a count
+            self.employment_type = None
+            if self.workers == "count":
+                raise ValidationError(
+                    {"workers": "A rate for one employee can't be for the Daily Labour Count (no names there)."}
+                )
+        if self.employment_type_id and self.workers == "count":
+            raise ValidationError(
+                {"employment_type": "Employee types are for registered employees, not the Daily Labour Count."}
+            )
         if self.job_type_id and self.effective_from and not getattr(self, "_skip_overlap_check", False):
             clash = self.overlapping().first()
             if clash:
@@ -291,34 +388,31 @@ class WageRate(TimeStampedModel):
                 )
 
     def overlapping(self):
-        """Rates of the same job + employee type whose period overlaps this one.
-        An older rate with no end date is not a clash: saving closes it automatically."""
+        """Rates for exactly the same work (job, plot, employee, employee type, applies to) whose period
+        overlaps this one. An older rate with no end date is not a clash: saving closes it automatically."""
         end = self.effective_to or dt.date.max
         qs = (
-            WageRate.objects.filter(
-                job_type_id=self.job_type_id, employment_type_id=self.employment_type_id, effective_from__lte=end
-            )
+            self._same_scope()
+            .filter(effective_from__lte=end)
             .filter(Q(effective_to__isnull=True) | Q(effective_to__gte=self.effective_from))
             .exclude(effective_to__isnull=True, effective_from__lt=self.effective_from)
         )
         return qs.exclude(pk=self.pk) if self.pk else qs
 
     def _previous(self, start):
-        """The rate that was auto-closed the day before `start` (same job + employee type)."""
-        return (
-            WageRate.objects.filter(
-                job_type_id=self.job_type_id,
-                employment_type_id=self.employment_type_id,
-                effective_to=start - dt.timedelta(days=1),
-            )
-            .exclude(pk=self.pk)
-            .first()
-        )
+        """The rate for the same work that was auto-closed the day before `start`."""
+        return self._same_scope().filter(effective_to=start - dt.timedelta(days=1)).exclude(pk=self.pk).first()
 
     def save(self, *args, **kwargs):
         if self.ot_rate_per_hour is None:
             self.ot_rate_per_hour = 0
-        old = WageRate.objects.filter(pk=self.pk).values("effective_from").first() if self.pk else None
+        if self.employee_id:
+            self.employment_type = None
+        old = (
+            WageRate.objects.filter(pk=self.pk).values("job_type_id", "effective_from", "effective_to").first()
+            if self.pk
+            else None
+        )
         super().save(*args, **kwargs)
         if old and old["effective_from"] != self.effective_from:
             prev = self._previous(old["effective_from"])
@@ -327,23 +421,50 @@ class WageRate(TimeStampedModel):
                 WageRate.objects.filter(pk=prev.pk).update(effective_to=self.effective_from - dt.timedelta(days=1))
         if not getattr(self, "_close_later", False):  # set when the caller saves several rates and closes once
             close_open_rates(self.job_type_id)
+        # work already entered in this period gets the new rate (unless its wage was typed by hand)
+        starts = [self.effective_from] + ([old["effective_from"]] if old else [])
+        ends = [self.effective_to] + ([old["effective_to"]] if old else [])
+        reapply_rates(self.job_type_id, min(starts), None if None in ends else max(ends))
+        if old and old["job_type_id"] != self.job_type_id:
+            reapply_rates(old["job_type_id"], old["effective_from"], old["effective_to"])
 
     def delete(self, *args, **kwargs):
         prev = self._previous(self.effective_from)
+        job_id, start, end = self.job_type_id, self.effective_from, self.effective_to
         result = super().delete(*args, **kwargs)
         if prev:
             # give the dates back to the rate before it, so they don't fall back to the default wage
             WageRate.objects.filter(pk=prev.pk).update(effective_to=self.effective_to)
-            close_open_rates(self.job_type_id)
+            close_open_rates(job_id)
+        reapply_rates(job_id, start, end)
         return result
 
 
 def close_open_rates(job_type_id):
-    """A rate with no 'Date to' runs until the day before the next rate (same job + employee type) starts."""
+    """A rate with no 'Date to' runs until the day before the next rate for the same work starts."""
     groups = {}
     for r in WageRate.objects.filter(job_type_id=job_type_id).order_by("effective_from", "id"):
-        groups.setdefault(r.employment_type_id, []).append(r)
+        groups.setdefault(r.scope_key(), []).append(r)
     for rates in groups.values():
         for cur, nxt in pairwise(rates):
             if cur.effective_to is None and nxt.effective_from > cur.effective_from:
                 WageRate.objects.filter(pk=cur.pk).update(effective_to=nxt.effective_from - dt.timedelta(days=1))
+
+
+def reapply_rates(job_type_id, d1, d2=None):
+    """Individual work entries and Daily Labour Counts of a job type between two dates (d2 None = no end)
+    take the wage and OT rate now in force for them. Wages typed by hand on an entry are kept."""
+    from .. import productivity
+    from . import workforce
+
+    if not job_type_id or not d1:
+        return
+    with productivity.paused():
+        for model in (workforce.WorkEntry, workforce.GroupWorkEntry):
+            qs = model.objects.filter(job_type_id=job_type_id, date__gte=d1).filter(Q(wage_auto=True) | Q(ot_auto=True))
+            if d2:
+                qs = qs.filter(date__lte=d2)
+            if model is workforce.WorkEntry:
+                qs = qs.select_related("employee")
+            for entry in qs.iterator(chunk_size=500):
+                entry.save()

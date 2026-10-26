@@ -6,13 +6,15 @@ Two kinds of workers are paid:
 1. Registered employees - from attendance and individual work details. For every day worked the wage
    and OT rate are taken in this order:
      a. Individual work details - Work Entries for that employee on that day (added up)
-     b. Job type                - its wage history for that date (and employee type), else its defaults
+     b. Job type                - its wage list (Salary Details) for that date: the most precise rate that
+                                  fits (this employee / plot / employee type), else its defaults
    The part of the day that is paid comes from the attendance status (Full day = 1, Half day = 0.5 ...).
    OT hours come from the work entries if they have any, otherwise from attendance.
 
 2. Day labourers in the Daily Labour Count - not registered, entered only as a number per day and
    work type. They are paid per gang leader (who receives the money): man-days x wage per worker
-   plus their overtime, exactly as entered on each day's count. Registered employees are never part
+   plus their overtime, as on each day's count (which follows the wage list for its date, job and
+   plot, unless a wage was typed on it). Registered employees are never part
    of a count, so nobody is paid twice.
 """
 
@@ -95,7 +97,7 @@ def _result(lines, full, half, leave, ot_total):
     }
 
 
-def calculate(emp, d1, d2, ctx=None):
+def calculate(emp, d1, d2, ctx=None, block_ids=None):
     """A registered employee: None if there is nothing to pay, else day counts, totals and one
     breakdown line per rate used."""
     ctx = ctx or PayrollContext(d1, d2, employees=[emp])
@@ -108,6 +110,13 @@ def calculate(emp, d1, d2, ctx=None):
     lines = OrderedDict()
     for day in sorted(set(attendance) | set(works)):
         a, entries = attendance.get(day), works.get(day)
+        if block_ids:  # chosen plots: only the work done there (work entries first, else the attendance's plot)
+            if entries:
+                entries = [w for w in entries if w.block_id in block_ids]
+                if not entries:
+                    continue
+            elif not (a and a.block_id in block_ids):
+                continue
         fraction = a.status.pay_fraction if a else Decimal(1)  # a work entry without attendance = full day
         if not fraction:
             leave += bool(a and a.status.is_leave)
@@ -117,7 +126,9 @@ def calculate(emp, d1, d2, ctx=None):
         else:
             half += 1
         job_id = (entries[0].job_type_id if entries else None) or (a.job_type_id if a else None) or emp.job_type_id
-        standard = ctx.book.wages_on(job_id, day, emp_type)
+        day_block = (entries[0].block_id if entries else None) or (a.block_id if a else None)
+        work = m.WorkContext(employee_id=emp.pk, employment_type_id=emp_type, block_id=day_block)
+        standard = ctx.book.wages_on(job_id, day, work)
         if entries and any(w.wage for w in entries):
             rate, ot_hours, ot_amount = _day_entries(entries)
             ot_rate = m.q2(ot_amount / ot_hours) if ot_hours else entries[0].ot_rate
@@ -139,12 +150,14 @@ def calculate(emp, d1, d2, ctx=None):
     return _result(lines, full, half, leave, ot_total) if lines else None
 
 
-def calculate_counts(d1, d2, job_type=None):
+def calculate_counts(d1, d2, job_type=None, block_ids=None):
     """Daily Labour Count entries of the period, per gang leader (None = entries without one):
     {gang_leader_id: result}. One breakdown line per work type and rate."""
     qs = m.GroupWorkEntry.objects.filter(date__range=(d1, d2)).select_related("job_type").order_by("date", "id")
     if job_type is not None:
         qs = qs.filter(job_type=job_type)
+    if block_ids:
+        qs = qs.filter(block_id__in=block_ids)
     per_leader = OrderedDict()
     for g in qs:
         if not g.workers_count and not g.ot_total_hours:
@@ -195,19 +208,34 @@ def default_status():
     return m.PaymentStatus.objects.filter(is_active=True, is_final=False).order_by("sort_order", "id").first()
 
 
-def existing_count_payments(d1, d2, gang_leader_id):
-    """Daily Labour Count payments of a gang leader (None = without one) overlapping a period."""
-    return m.SalaryPayment.objects.filter(
+def plots_overlap(a, b):
+    """Do two payrolls cover some of the same work? Plot sets; an empty set means all plots."""
+    return not a or not b or bool(set(a) & set(b))
+
+
+def overlapping(payments, block_ids):
+    """The payrolls (blocks prefetched) that cover some of the work of a new payroll for these plots;
+    payrolls made only for other plots are left out."""
+    return [p for p in payments if plots_overlap(p.plot_ids, block_ids)]
+
+
+def existing_count_payments(d1, d2, gang_leader_id, block_ids=None):
+    """Daily Labour Count payments of a gang leader (None = without one) overlapping a period and plots."""
+    qs = m.SalaryPayment.objects.filter(
         employee__isnull=True, gang_leader_id=gang_leader_id, period_from__lte=d2, period_to__gte=d1
-    )
+    ).prefetch_related("blocks")
+    return overlapping(qs.select_related("status"), block_ids)
 
 
-def save(emp, d1, d2, calc, user=None, status=None, payment=None, gang_leader=None, **extra):
+def save(emp, d1, d2, calc, user=None, status=None, payment=None, gang_leader=None, blocks=(), **extra):
     """Create a salary payment (for an employee, or for a gang leader's Daily Labour Count when emp is
     None), or re-calculate `payment` keeping what was typed by hand (bonus, deductions, payment date /
     mode, status)."""
     p = payment or m.SalaryPayment(
-        employee=emp, gang_leader=None if emp else gang_leader, created_by=user, status=status or default_status()
+        employee=emp,
+        gang_leader=None if emp else gang_leader,
+        created_by=user,
+        status=status or default_status(),
     )
     p.period_from, p.period_to = d1, d2
     p.full_days, p.half_days, p.leave_days = calc["full"], calc["half"], calc["leave"]
@@ -216,4 +244,5 @@ def save(emp, d1, d2, calc, user=None, status=None, payment=None, gang_leader=No
     for key, value in extra.items():
         setattr(p, key, value)
     p.save()
+    p.blocks.set(blocks)
     return p
