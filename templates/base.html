@@ -2,13 +2,13 @@
 <html lang="{{ CURRENT_LANG }}">
 <head>
   <meta charset="utf-8">
-  {% if MOBILE_APP %}<meta name="viewport" content="width=device-width, initial-scale=1">{# the phone app fits its screen between the bars and above the keyboard itself #}{% else %}<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">{% endif %}
+  {% if MOBILE_APP %}<meta name="viewport" content="width=device-width, initial-scale=1"><style>:root{--sab:{{ request.COOKIES.pms_sab|add:0|default:0 }}px}</style>{# the phone app fits its screen between the bars and above the keyboard itself #}{% else %}<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">{% endif %}
   <meta name="theme-color" content="{{ APP.header_color }}">
   <title>{% block title %}{% t "Plantation Management System" %}{% endblock %} · {{ ESTATE_NAME }}</title>
   <link href="{% static 'vendor/bootstrap/bootstrap.min.css' %}" rel="stylesheet">
   <link href="{% static 'vendor/bootstrap-icons/bootstrap-icons.min.css' %}" rel="stylesheet">
   <link href="{% static 'vendor/flatpickr/flatpickr.min.css' %}" rel="stylesheet">
-  <link href="{% static 'css/app.css' %}?v={{ ASSET_V }}" rel="stylesheet">
+  <link href="{% static_v 'css/app.css' %}" rel="stylesheet">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/png" href="{% static 'icons/favicon-32.png' %}">
   <link rel="apple-touch-icon" href="{% static 'icons/apple-touch-icon.png' %}">
@@ -29,7 +29,7 @@
       <i class="bi bi-list fs-3"></i>
     </button>
     <a class="navbar-brand text-white fw-semibold d-flex align-items-center gap-2" href="{% url 'dashboard' %}">
-      {% if APP.logo_type %}<img class="app-logo" src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="">{% else %}<img class="app-logo" src="{% static 'icons/icon-96.png' %}?v={{ ASSET_V }}" alt="">{% endif %}<span class="brand-name" title="{{ ESTATE_NAME|default:'' }}">{% if ESTATE_NAME %}{{ ESTATE_NAME }}{% else %}{% t "Plantation Management System" %}{% endif %}</span>
+      {% if APP.logo_type %}<img class="app-logo" src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="">{% else %}<img class="app-logo" src="{% static_v 'icons/icon-96.png' %}" alt="">{% endif %}<span class="brand-name" title="{{ ESTATE_NAME|default:'' }}">{% if ESTATE_NAME %}{{ ESTATE_NAME }}{% else %}{% t "Plantation Management System" %}{% endif %}</span>
     </a>
     <div class="ms-auto d-flex align-items-center gap-2">
       {% if DEMO_MODE %}<span class="badge text-bg-warning d-none d-md-inline"><i class="bi bi-easel"></i> {% t "DEMO" %}</span>{% endif %}
@@ -87,7 +87,7 @@
   {% if not POPUP %}
   <aside class="offcanvas-lg offcanvas-start sidebar" tabindex="-1" id="sidebar">
     <div class="offcanvas-header d-lg-none">
-      <h5 class="offcanvas-title d-flex align-items-center gap-2"><img class="app-logo" src="{% static 'icons/icon-96.png' %}?v={{ ASSET_V }}" alt=""> {% t "Menu" %}</h5>
+      <h5 class="offcanvas-title d-flex align-items-center gap-2"><img class="app-logo" src="{% static_v 'icons/icon-96.png' %}" alt=""> {% t "Menu" %}</h5>
       <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-bs-target="#sidebar"></button>
     </div>
     <div class="offcanvas-body flex-column p-0">
@@ -155,11 +155,28 @@
   {% block auth_content %}{% endblock %}
 {% endif %}
 
+{% if MOBILE_APP %}<script>
+  // phone app: the keyboard opens over the page (no empty strip). The app reports how many pixels it
+  // covers; the page gets that much scroll room at the bottom and the field being typed in moves above it.
+  window.PMSKeyboard = function (px) {
+    const root = document.documentElement;
+    root.style.setProperty("--kb", (px || 0) + "px");
+    root.classList.toggle("app-kb", px > 0);
+    if (document.body) document.body.classList.toggle("kb-open", px > 0);
+    const el = document.activeElement;
+    if (px > 0 && el && el !== document.body && el.scrollIntoView) {
+      setTimeout(() => {
+        const r = el.getBoundingClientRect();
+        if (r.bottom > window.innerHeight - px - 12 || r.top < 0) el.scrollIntoView({ block: "center", behavior: "smooth" });
+      }, 60);
+    }
+  };
+</script>{% endif %}
 <script src="{% static 'vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
 <script src="{% static 'vendor/flatpickr/flatpickr.min.js' %}"></script>
-<script src="{% static 'js/dates.js' %}?v={{ ASSET_V }}"></script>
+<script src="{% static_v 'js/dates.js' %}"></script>
 <script id="confirm-text" type="application/json">{"title": "{% filter escapejs %}{% t 'Delete this record?' %}{% endfilter %}", "warn": "{% filter escapejs %}{% t 'This cannot be undone.' %}{% endfilter %}", "yes": "{% filter escapejs %}{% t 'Yes, delete' %}{% endfilter %}", "cancel": "{% filter escapejs %}{% t 'Cancel' %}{% endfilter %}", "yesAll": "{% filter escapejs %}{% t 'Yes, delete all' %}{% endfilter %}", "checking": "{% filter escapejs %}{% t 'Checking linked records…' %}{% endfilter %}", "alsoDelete": "{% filter escapejs %}{% t 'Also deleted:' %}{% endfilter %}", "cleared": "{% filter escapejs %}{% t 'Kept, only the link is emptied:' %}{% endfilter %}", "blocked": "{% filter escapejs %}{% t 'It cannot be deleted - still used by:' %}{% endfilter %}", "blockedHelp": "{% filter escapejs %}{% t 'Mark it inactive instead (edit it and switch off Active).' %}{% endfilter %}", "more": "{% filter escapejs %}{% t '+{n} more' %}{% endfilter %}", "close": "{% filter escapejs %}{% t 'Close' %}{% endfilter %}", "failed": "{% filter escapejs %}{% t 'Could not check the linked records.' %}{% endfilter %}"}</script>
-<script src="{% static 'js/confirm.js' %}?v={{ ASSET_V }}"></script>
+<script src="{% static_v 'js/confirm.js' %}"></script>
 <script>
   // the phone app (installed from the APK) adds window.PMSApp; installed web apps use the service worker
   if (window.PMSApp) document.querySelectorAll("[data-app-only]").forEach((el) => el.classList.remove("d-none"));
@@ -168,7 +185,7 @@
   }
 </script>
 {% if user.is_authenticated %}{{ TABLE_TOOLS_TEXT|json_script:"table-tools-text" }}
-<script src="{% static 'js/table-tools.js' %}?v={{ ASSET_V }}"></script>{% endif %}
+<script src="{% static_v 'js/table-tools.js' %}"></script>{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

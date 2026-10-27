@@ -137,7 +137,7 @@ def dashboard(request):
         m.FieldOperation.objects.filter(
             next_due_date__range=(today - dt.timedelta(days=30), today + dt.timedelta(days=21))
         )
-        .select_related("block", "agri_input__unit", "operation_type")
+        .select_related("block", "operation_type")
         .order_by("next_due_date")[:6]
     )
     return render(
@@ -188,9 +188,9 @@ def dashboard(request):
             "due": due,
             "overdue": sum(1 for o in due if o.next_due_date < today),
             "recent_harvests": m.Harvest.objects.select_related("product__unit", "block").order_by("-date", "-id")[:5],
-            "recent_ops": m.FieldOperation.objects.select_related(
-                "block", "agri_input__unit", "operation_type"
-            ).order_by("-date", "-id")[:5],
+            "recent_ops": m.FieldOperation.objects.select_related("block", "operation_type").order_by("-date", "-id")[
+                :5
+            ],
         },
     )
 
@@ -354,12 +354,26 @@ def _analysis_pdf(d):
     )
     pdf.section(ui("Fertilizer / chemical usage"))
     pdf.data_table(
-        [ui("Fertilizer / chemical"), ui("Applications"), ui("Quantity"), ui("Cost"), ui("Last used")],
         [
-            [i["name"], i["n"], f"{num(i['qty'])} {i['unit']}", inr(i["cost"], 0), dates.fmt(i["last"])]
+            ui("Fertilizer / chemical"),
+            ui("Applications"),
+            ui("Quantity"),
+            ui("Cost"),
+            ui("Average cost per unit"),
+            ui("Last used"),
+        ],
+        [
+            [
+                i["name"],
+                i["n"],
+                f"{num(i['qty'])} {i['unit']}",
+                inr(i["cost"], 0),
+                inr(i["avg_cost"]),
+                dates.fmt(i["last"]),
+            ]
             for i in d["inputs"]
         ],
-        [False, True, True, True, False],
+        [False, True, True, True, True, False],
     )
     lo = d["last_ops"]
     if lo["ops"]:

@@ -142,7 +142,7 @@
 {% endblock %}
 {% block scripts %}
 <script src="{% static 'vendor/chartjs/chart.umd.min.js' %}"></script>
-<script src="{% static 'js/charts.js' %}?v={{ ASSET_V }}"></script>
+<script src="{% static_v 'js/charts.js' %}"></script>
 <script>
 (function () {
   const B = JSON.parse(document.getElementById("builder-data").textContent);

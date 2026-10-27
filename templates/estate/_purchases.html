@@ -1,0 +1,53 @@
+{% load estate_tags core_tags %}
+<div class="mt-4" id="purchases">
+  <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-2">
+    <div>
+      <h2 class="h6 mb-0"><i class="bi bi-bag text-primary"></i> {% t "Purchases" %}</h2>
+      <div class="form-text mt-0">{% t "Every purchase with its own price. Field work picks the purchase it used, so its cost stays the price paid for that batch, even when the price changes later." %}</div>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-primary" id="addPurchase"><i class="bi bi-plus"></i> {% t "Add purchase" %}</button>
+  </div>
+  {% if instance %}
+  <div class="buy-summary mb-2">
+    <span><span class="text-muted">{% t "Total bought" %}</span> <strong>{{ instance.purchased_qty|num }} {{ instance.unit_name }}</strong></span>
+    <span><span class="text-muted">{% t "Total used" %}</span> <strong>{{ instance.used_qty|num }} {{ instance.unit_name }}</strong></span>
+    <span><span class="text-muted">{% t "Stock left" %}</span> <strong class="{% if instance.stock_qty < 0 %}text-danger{% else %}text-success{% endif %}">{{ instance.stock_qty|num }} {{ instance.unit_name }}</strong></span>
+    <span><span class="text-muted">{% t "Latest cost per unit" %}</span> <strong>{{ CURRENCY }}{{ instance.unit_cost|inr }}{% if instance.unit_name %} / {{ instance.unit_name }}{% endif %}</strong></span>
+  </div>
+  {% endif %}
+  {{ lines.management_form }}
+  {% for e in lines.non_form_errors %}<div class="alert alert-danger py-2 small">{{ e }}</div>{% endfor %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0 buy-table">
+      <thead><tr>
+        {% for name in "date bags pack_size price_per_bag supplier invoice_no"|split %}{% with f=lines.empty_form|field:name %}<th>{{ f.label }}{% if f.field.required %} *{% endif %}</th>{% endwith %}{% endfor %}
+        <th class="num">{% t "Total amount" %}</th><th class="num">{% t "Cost per unit" %}</th><th class="num">{% t "Used" %}</th><th class="num">{% t "Left in stock" %}</th>
+        <th class="text-center">{% t "Remove" %}</th>
+      </tr></thead>
+      <tbody id="buyRows">
+      {% for f in lines %}
+        <tr data-buy>
+          {% for name in "date bags pack_size price_per_bag supplier invoice_no"|split %}
+            {% with fld=f|field:name %}<td>{{ fld }}{% for e in fld.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}</td>{% endwith %}
+          {% endfor %}
+          <td class="num" data-b="total">{{ f.instance.total_amount|inr }}</td>
+          <td class="num" data-b="unit">{{ f.instance.unit_cost|num }}</td>
+          <td class="num">{% if f.instance.pk %}{{ f.instance.used_qty|num }}{% endif %}</td>
+          <td class="num {% if f.instance.left_qty < 0 %}text-danger fw-semibold{% endif %}">{% if f.instance.pk %}{{ f.instance.left_qty|num }}{% endif %}</td>
+          <td class="text-center">{% for hf in f.hidden_fields %}{{ hf }}{% endfor %}{% if f.instance.pk %}{{ f.DELETE }}{% else %}<span class="text-muted small">{% t "new" %}</span>{% endif %}</td>
+        </tr>
+        {% if f.non_field_errors %}<tr><td colspan="11"><div class="text-danger small">{{ f.non_field_errors|join:" " }}</div></td></tr>{% endif %}
+      {% empty %}
+        <tr data-empty><td colspan="11" class="text-muted small">{% t "No purchase entered yet. Add one so field work can use its price." %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <template id="buyTemplate">
+    <tr data-buy>
+      {% for name in "date bags pack_size price_per_bag supplier invoice_no"|split %}<td>{{ lines.empty_form|field:name }}</td>{% endfor %}
+      <td class="num" data-b="total"></td><td class="num" data-b="unit"></td><td></td><td></td>
+      <td class="text-center">{% for hf in lines.empty_form.hidden_fields %}{{ hf }}{% endfor %}<span class="text-muted small">{% t "new" %}</span></td>
+    </tr>
+  </template>
+</div>

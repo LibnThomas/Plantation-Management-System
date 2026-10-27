@@ -131,7 +131,7 @@
       {% for o in due %}<li class="list-group-item"><a href="{% url 'estate:update' 'field-operations' o.pk %}">
         <span class="dash-date-chip {% if o.next_due_date < today %}late{% endif %}"><b>{{ o.next_due_date|date:"d" }}</b>{{ o.next_due_date|date:"M" }}</span>
         <span class="flex-grow-1 text-truncate"><strong>{{ o.operation_type }}</strong>
-          <span class="d-block text-muted">{% if o.block %}{{ o.block }}{% else %}{% t "All blocks" %}{% endif %}{% if o.agri_input %} · {{ o.agri_input.name }}{% endif %}</span></span>
+          <span class="d-block text-muted">{% if o.block %}{{ o.block }}{% else %}{% t "All blocks" %}{% endif %}{% if o.chemicals_text %} · {{ o.chemicals_text }}{% endif %}</span></span>
         {% if o.next_due_date < today %}<span class="badge text-bg-danger">{% t "overdue" %}</span>{% endif %}</a></li>
       {% empty %}<li class="list-group-item text-muted">{% t "Nothing due. Set 'Next due date' when recording fertilizer / spray rounds." %}</li>{% endfor %}
     </ul></div></div>
@@ -150,7 +150,7 @@
       {% for o in recent_ops %}<li class="list-group-item"><a href="{% url 'estate:update' 'field-operations' o.pk %}">
         <span class="dash-date-chip"><b>{{ o.date|date:"d" }}</b>{{ o.date|date:"M" }}</span>
         <span class="flex-grow-1 text-truncate"><strong>{{ o.operation_type }}</strong>
-          <span class="d-block text-muted">{% if o.block %}{{ o.block }}{% endif %}{% if o.agri_input %} · {{ o.agri_input.name }} {{ o.quantity|num }} {{ o.agri_input.unit|default:"" }}{% endif %}</span></span>
+          <span class="d-block text-muted">{% if o.block %}{{ o.block }}{% endif %}{% if o.chemicals_text %} · {{ o.chemicals_text }}{% endif %}</span></span>
         <span class="text-nowrap">{{ CURRENCY }}{{ o.total_cost|inr:0 }}</span></a></li>
       {% empty %}<li class="list-group-item text-muted">{% t "No field work recorded yet." %}</li>{% endfor %}
     </ul></div></div>
@@ -186,7 +186,7 @@
 {% endblock %}
 {% block scripts %}
 <script src="{% static 'vendor/chartjs/chart.umd.min.js' %}"></script>
-<script src="{% static 'js/charts.js' %}?v={{ ASSET_V }}"></script>
+<script src="{% static_v 'js/charts.js' %}"></script>
 <script>
 const C = JSON.parse(document.getElementById("chart-data").textContent);
 const $ = (id) => document.getElementById(id);

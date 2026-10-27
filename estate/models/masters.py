@@ -118,8 +118,27 @@ class Block(TimeStampedModel):
         return self.name
 
 
+DOSE_BASES = [("water", "per litres of water"), ("plant", "per plant"), ("acre", "per acre")]
+# a field-work line can also be an amount in one batch of a dry mix
+LINE_BASES = [*DOSE_BASES, ("batch", "in one batch (dry mix)")]
+
+
+def unit_cost_field(verbose_name, **kw):
+    """Cost of one kg / L / g ...: 4 decimals, so small units (g, ml) keep their price."""
+    kw.setdefault("max_digits", 14)
+    kw.setdefault("decimal_places", 4)
+    kw.setdefault("default", 0)
+    kw.setdefault("validators", POSITIVE)
+    return models.DecimalField(verbose_name, **kw)
+
+
+def stock_field(verbose_name, **kw):
+    return models.DecimalField(verbose_name, max_digits=14, decimal_places=3, default=0, editable=False, **kw)
+
+
 class AgriInput(TimeStampedModel):
-    """Fertilizers, pesticides, fungicides, manures... with unit and cost."""
+    """Fertilizers, pesticides, fungicides, manures... with unit, pack size, dosage and stock.
+    Prices come from its purchases (each purchase keeps its own price)."""
 
     STR_RELATED = ("unit",)  # used by __str__: lists load it in the same query
     name = models.CharField("Name", max_length=100, unique=True)
@@ -128,8 +147,43 @@ class AgriInput(TimeStampedModel):
     composition = models.CharField(
         "Composition / Active ingredient", max_length=150, blank=True, help_text="e.g. NPK 18:18:18, Spinosad 45% SC"
     )
-    unit = models.ForeignKey(Unit, verbose_name="Unit", null=True, blank=True, on_delete=models.SET_NULL)
-    unit_cost = money_field("Cost per unit")
+    unit = models.ForeignKey(
+        Unit, verbose_name="Unit", null=True, blank=True, on_delete=models.SET_NULL, help_text="kg, L, g ..."
+    )
+    pack_size = models.DecimalField(
+        "Quantity per bag / bottle",
+        max_digits=12,
+        decimal_places=3,
+        default=0,
+        blank=True,
+        validators=POSITIVE,
+        help_text="In the unit above, e.g. 25 for a 25 kg bag, 1 for a 1 L bottle",
+    )
+    dose_qty = models.DecimalField(
+        "Dosage",
+        max_digits=12,
+        decimal_places=3,
+        default=0,
+        blank=True,
+        validators=POSITIVE,
+        help_text="How much of it, in its unit: e.g. 1.5 (L) for 500 L of water, or 1 (kg) per plant",
+    )
+    dose_basis = models.CharField("Dosage is", max_length=10, choices=DOSE_BASES, default="water")
+    dose_water = models.DecimalField(
+        "For litres of water",
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        blank=True,
+        validators=POSITIVE,
+        help_text="Only for 'per litres of water': e.g. 500",
+    )
+    unit_cost = unit_cost_field(
+        "Latest cost per unit", editable=False, help_text="From the latest purchase. Each purchase keeps its own price."
+    )
+    purchased_qty = stock_field("Total bought")
+    used_qty = stock_field("Total used")
+    stock_qty = stock_field("Stock left")
     is_active = models.BooleanField("Active", default=True)
 
     class Meta:
@@ -139,6 +193,60 @@ class AgriInput(TimeStampedModel):
 
     def __str__(self):
         return f"{self.name} ({self.unit})" if self.unit_id else self.name
+
+    def save(self, *args, **kwargs):
+        for name in ("pack_size", "dose_qty", "dose_water"):
+            if getattr(self, name) is None:  # left empty on the form
+                setattr(self, name, 0)
+        super().save(*args, **kwargs)
+
+    @property
+    def unit_name(self):
+        return str(self.unit) if self.unit_id else ""
+
+    def dosage_text(self):
+        return dosage_text(self.dose_qty, self.dose_basis, self.dose_water, self.unit_name)
+
+    def refresh_stock(self, using=None):
+        """Totals from the purchases and the field-work entries that used it (kept on the record so lists,
+        reports and exports can show them). The latest purchase gives the 'latest cost per unit'."""
+        from django.db.models import Sum
+
+        using = using or self._state.db or "default"
+        purchases = self.purchases.using(using)
+        bought = purchases.aggregate(t=Sum("quantity"))["t"] or 0
+        used = self.uses.using(using).aggregate(t=Sum("quantity"))["t"] or 0
+        latest = purchases.order_by("-date", "-id").first()
+        fields = {"purchased_qty": bought, "used_qty": used, "stock_qty": bought - used}
+        if latest is not None:
+            fields["unit_cost"] = latest.unit_cost
+        type(self).objects.using(using).filter(pk=self.pk).update(**fields)
+        for k, v in fields.items():
+            setattr(self, k, v)
+
+
+def _n(value):
+    """1.500 -> 1.5, 500.00 -> 500"""
+    text = f"{value or 0:f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def dosage_text(qty, basis, water, unit=""):
+    """'1.5 L per 500 L water', '1 kg per plant', '' when no dosage is set."""
+    from core.i18n import ui
+
+    if not qty:
+        return ""
+    amount = f"{_n(qty)} {unit}".strip()
+    if basis == "plant":
+        return ui("{amount} per plant", amount=amount)
+    if basis == "acre":
+        return ui("{amount} per acre", amount=amount)
+    if basis == "batch":
+        return ui("{amount} in one batch", amount=amount)
+    if water:
+        return ui("{amount} per {water} L water", amount=amount, water=_n(water))
+    return amount
 
 
 class GangLeader(TimeStampedModel):

@@ -255,3 +255,77 @@ def build_wage_history_formset(extra=1):
         can_delete=True,
         widgets={"effective_from": DateInput(), "effective_to": DateInput()},
     )
+
+
+# ---------------------------------------------------------------------------
+# Fertilizers / chemicals: purchases (on the chemical's page) and the chemicals used in field work
+# ---------------------------------------------------------------------------
+NUMBER_FIELDS_ZERO = ("bags", "pack_size", "price_per_bag", "dose_qty", "dose_water", "quantity", "unit_cost")
+
+
+class _ZeroIfBlank:
+    """Number boxes may be left empty: empty means 0 (worked out when saving where it can be)."""
+
+    def _post_clean(self):
+        for name in NUMBER_FIELDS_ZERO:
+            if name in self.cleaned_data and self.cleaned_data[name] is None:
+                self.cleaned_data[name] = 0
+        super()._post_clean()
+
+
+class PurchaseForm(_ZeroIfBlank, StyledModelForm):
+    class Meta:
+        model = m.AgriInputPurchase
+        fields = ["date", "bags", "pack_size", "price_per_bag", "supplier", "invoice_no"]
+        widgets = {"date": DateInput()}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name in ("bags", "pack_size", "price_per_bag"):
+            self.fields[name].required = False
+        style_fields(self.fields, small=True)
+
+
+class ChemicalLineForm(_ZeroIfBlank, StyledModelForm):
+    class Meta:
+        model = m.FieldOperationInput
+        fields = ["agri_input", "dose_qty", "dose_basis", "dose_water", "purchase", "quantity", "unit_cost"]
+        # dose_water: the jar size the amount is for (kept in step with the entry's jar size by the page)
+        widgets = {
+            "agri_input": forms.HiddenInput(),
+            "dose_water": forms.HiddenInput(),
+            "dose_basis": forms.HiddenInput(),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name in ("dose_qty", "dose_water", "quantity", "unit_cost"):
+            self.fields[name].required = False
+        self.fields["agri_input"].queryset = m.AgriInput.objects.all()  # an old entry may use an inactive one
+        self.fields["purchase"].queryset = m.AgriInputPurchase.objects.select_related("agri_input")
+        self.fields["purchase"].empty_label = "— " + ui("no purchase (enter the cost)") + " —"
+        style_fields(self.fields, small=True)
+
+    def clean(self):
+        data = super().clean()
+        purchase, chem = data.get("purchase"), data.get("agri_input")
+        if purchase and chem and purchase.agri_input_id != chem.pk:
+            self.add_error("purchase", ui("This purchase is of another fertilizer / chemical."))
+        return data
+
+
+def build_purchase_formset():
+    return inlineformset_factory(
+        m.AgriInput, m.AgriInputPurchase, form=PurchaseForm, fields=PurchaseForm.Meta.fields, extra=0, can_delete=True
+    )
+
+
+def build_chemical_formset():
+    return inlineformset_factory(
+        m.FieldOperation,
+        m.FieldOperationInput,
+        form=ChemicalLineForm,
+        fields=ChemicalLineForm.Meta.fields,
+        extra=0,
+        can_delete=True,
+    )

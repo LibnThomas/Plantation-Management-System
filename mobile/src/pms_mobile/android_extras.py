@@ -5,9 +5,12 @@ Android only (imported on Android): what a browser does but a bare web view does
   suitable app (PDF viewer, Sheets ...). The file is fetched from the app's own server inside the phone,
   with the logged-in session.
 - Back button: goes back a page; on the first page it leaves the app as usual.
-- Keyboard: the app's screen ends at the top of the keyboard (Android only moves the whole screen up
-  otherwise, leaving a gap and hiding the field being typed in). The strip of the phone's own buttons /
-  gesture bar below the app gets the menu's white.
+- Keyboard: it opens over the app. Android neither shrinks nor moves the screen (that left an empty strip
+  above the keyboard); the page is told the keyboard's height instead and scrolls the field being typed
+  in above it.
+- Bottom: the app reaches the bottom of the screen. The page's bottom menu only keeps clear of the
+  phone's own buttons (3-button navigation); with gesture navigation there is no extra space below it.
+- The web view gets no screen insets of its own (they are used up here), so nothing is counted twice.
 """
 
 import threading
@@ -21,7 +24,7 @@ from android.provider import MediaStore
 from android.view import KeyEvent, View, ViewGroup, WindowManager
 from android.webkit import CookieManager, DownloadListener, URLUtil
 from android.widget import Toast
-from androidx.core.view import OnApplyWindowInsetsListener, ViewCompat, WindowInsetsCompat
+from androidx.core.view import OnApplyWindowInsetsListener, ViewCompat, WindowCompat, WindowInsetsCompat
 from java import cast, dynamic_proxy
 from java.io import File, FileOutputStream
 from java.lang import Runnable
@@ -113,32 +116,53 @@ class _Back(dynamic_proxy(View.OnKeyListener)):
 
 
 class _Insets(dynamic_proxy(OnApplyWindowInsetsListener)):
-    """Replaces Briefcase's listener on the app's content view: the same margins for the status bar,
-    navigation bar and camera cut-out, plus the keyboard at the bottom; keeps the status bar colour strip."""
+    """Replaces Briefcase's listener on the app's content view. Margins for the status bar and the sides
+    only; the bottom is handled by the page: it is told the height of the phone's own buttons (--sab) and
+    of the keyboard (--kb). Keeps the status bar colour strip. The insets are used up here, so the web view
+    adds no space of its own."""
 
-    def __init__(self, status_strip):
+    def __init__(self, status_strip, webview):
         super().__init__()
         self.status_strip = status_strip
+        self.webview = webview
+        self.sent = None
 
     def onApplyWindowInsets(self, view, insets):
         try:
             Type = WindowInsetsCompat.Type
             bars = insets.getInsets(Type.systemBars() | Type.displayCutout())
+            buttons = insets.getInsets(Type.tappableElement())  # 0 at the bottom with gesture navigation
             ime = insets.getInsets(Type.ime())
             lp = cast(ViewGroup.MarginLayoutParams, view.getLayoutParams())
-            lp.setMargins(bars.left, bars.top, bars.right, max(bars.bottom, ime.bottom))
+            lp.setMargins(bars.left, bars.top, bars.right, 0)
             view.setLayoutParams(lp)
             if self.status_strip is not None:
                 slp = cast(ViewGroup.MarginLayoutParams, self.status_strip.getLayoutParams())
                 slp.height = bars.top
                 slp.setMargins(bars.left, 0, bars.right, 0)
                 self.status_strip.setLayoutParams(slp)
+            density = view.getResources().getDisplayMetrics().density or 1
+            sab = round(buttons.bottom / density)  # CSS pixels
+            keyboard = round(max(0, ime.bottom - buttons.bottom) / density)
+            if (sab, keyboard) != self.sent:
+                self.sent = (sab, keyboard)
+                self._tell_page(sab, keyboard)
         except Exception:
             traceback.print_exc()
-        return insets
+        return WindowInsetsCompat.CONSUMED
+
+    def _tell_page(self, sab, keyboard):
+        url = self.webview.getUrl()
+        if url:  # remembered for the next pages, so they open with the right bottom space
+            CookieManager.getInstance().setCookie(url, f"pms_sab={sab}; path=/")
+        self.webview.evaluateJavascript(
+            f"document.documentElement.style.setProperty('--sab','{sab}px');"
+            f"window.PMSKeyboard && window.PMSKeyboard({keyboard})",
+            None,
+        )
 
 
-def _fit_keyboard(app, activity):
+def _fit_keyboard(app, activity, webview):
     content = activity.findViewById(_content_id())
     if content is None:
         return
@@ -148,9 +172,11 @@ def _fit_keyboard(app, activity):
         child = parent.getChildAt(i)
         if not child.equals(content):
             strip = child  # Briefcase's status bar colour strip
-    parent.setBackgroundColor(Color.WHITE)  # the gesture / button bar area below the app
-    activity.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-    app._pms_insets = _Insets(strip)
+    parent.setBackgroundColor(Color.WHITE)
+    window = activity.getWindow()
+    WindowCompat.setDecorFitsSystemWindows(window, False)  # the app alone decides the spacing (no double gaps)
+    window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)  # keyboard over the app
+    app._pms_insets = _Insets(strip, webview)
     ViewCompat.setOnApplyWindowInsetsListener(content, app._pms_insets)
     ViewCompat.requestApplyInsets(content)
 
@@ -172,7 +198,7 @@ def install(app, webview):
     settings.setTextZoom(100)  # the app has its own text size setting
     native.requestFocus()
     try:
-        _fit_keyboard(app, activity)
+        _fit_keyboard(app, activity, native)
     except Exception:  # an older Briefcase layout: the app still works, Android pans the screen instead
         traceback.print_exc()
     try:  # the app has its own top bar: Android's title bar ("Plantation MS") only takes room

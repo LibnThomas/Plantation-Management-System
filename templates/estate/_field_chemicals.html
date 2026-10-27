@@ -1,0 +1,127 @@
+{% load estate_tags core_tags %}
+<div class="mt-4 mix-box rounded-3 p-3" id="chemSection">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+    <div>
+      <h2 class="h6 mb-0"><i class="bi bi-eyedropper text-primary"></i> {% t "Fertilizers / chemicals Mix Ratio" %}</h2>
+      <div class="form-text mt-0">{% t "Pick a saved mix or search to add chemicals. Their amounts for this mix are worked out from each chemical's dosage; you can change them." %}</div>
+    </div>
+    <button type="button" class="btn btn-sm btn-success" id="mixPreviewBtn"><i class="bi bi-arrows-fullscreen"></i> {% t "Mixing preview" %}</button>
+  </div>
+
+  {# 1. saved mixes + search #}
+  <div class="row g-2 mb-3">
+    <div class="col-12 col-md-5">
+      <label class="form-label small fw-semibold mb-1" for="mixLoad">{% t "Saved mixes" %}</label>
+      <select class="form-select" id="mixLoad"><option value="">— {% t "use a saved mix…" %} —</option></select>
+    </div>
+    <div class="col-12 col-md-7">
+      <label class="form-label small fw-semibold mb-1" for="chemSearch">{% t "Add fertilizers / chemicals" %}</label>
+      <div class="chem-picker">
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-search"></i></span>
+          <input type="search" class="form-control" id="chemSearch" placeholder="{% t 'Search fertilizers / chemicals…' %}" autocomplete="off" aria-controls="chemMenu" aria-expanded="false">
+        </div>
+        <div class="chem-menu shadow" id="chemMenu" role="listbox" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  {# 2. in water or dry #}
+  <div class="mb-3">
+    <div class="form-label small fw-semibold mb-1">{% t "How is it mixed?" %}</div>
+    <div class="mix-type" role="radiogroup">
+      {% for value, label in form.mix_type.field.choices %}
+      <input type="radio" class="btn-check" name="mix_type" id="mixType_{{ value }}" value="{{ value }}" autocomplete="off"{% if form.mix_type.value == value %} checked{% endif %}>
+      <label class="btn btn-outline-primary" for="mixType_{{ value }}">
+        <i class="bi {% if value == 'water' %}bi-droplet-half{% else %}bi-bag{% endif %}"></i>
+        <span><strong>{{ label }}</strong><small>{% if value == 'water' %}{% t "spray / drench: amounts per jar of water" %}{% else %}{% t "manure / fertilizer blend: amounts per batch, given per plant" %}{% endif %}</small></span>
+      </label>
+      {% endfor %}
+    </div>
+    {% for e in form.mix_type.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+  </div>
+  <div class="row g-2 mb-3" data-mix-only="water">
+    <div class="col-6 col-md-4">
+      <label class="form-label small fw-semibold mb-1" for="{{ form.tank_litres.id_for_label }}">{{ form.tank_litres.label }}</label>
+      <div class="input-group">{{ form.tank_litres }}<span class="input-group-text">L</span></div>
+      <div class="form-text">{{ form.tank_litres.help_text }}</div>
+    </div>
+  </div>
+  <div class="row g-2 mb-3" data-mix-only="dry" hidden>
+    <div class="col-6 col-md-4">
+      <label class="form-label small fw-semibold mb-1" for="{{ form.mix_dose.id_for_label }}">{{ form.mix_dose.label }}</label>
+      {{ form.mix_dose }}
+      <div class="form-text">{{ form.mix_dose.help_text }}</div>
+    </div>
+    <div class="col-6 col-md-4">
+      <label class="form-label small fw-semibold mb-1" for="{{ form.packet_size.id_for_label }}">{{ form.packet_size.label }}</label>
+      {{ form.packet_size }}
+      <div class="form-text">{{ form.packet_size.help_text }}</div>
+    </div>
+  </div>
+
+  {# 3. the chemicals of the mix #}
+  {{ lines.management_form }}
+  {% for e in lines.non_form_errors %}<div class="alert alert-danger py-2 small">{{ e }}</div>{% endfor %}
+  <div id="chemRows" class="chem-rows">
+    {% for f in lines %}{% include "estate/_chem_row.html" %}{% endfor %}
+  </div>
+  <div class="text-muted small border rounded p-3 text-center bg-body" id="chemEmpty" hidden><i class="bi bi-info-circle"></i> {% t "No fertilizer / chemical added. Search above to add one (leave empty for work like weeding)." %}</div>
+
+  {# 4. rounds, name, totals #}
+  <div class="row g-2 mt-2 align-items-end">
+    <div class="col-6 col-md-3">
+      <label class="form-label small fw-semibold mb-1" for="{{ form.rounds.id_for_label }}">{{ form.rounds.label }}</label>
+      {{ form.rounds }}
+    </div>
+    <div class="col-6 col-md-4">
+      <label class="form-label small fw-semibold mb-1" for="{{ form.mix_name.id_for_label }}">{{ form.mix_name.label }}</label>
+      {{ form.mix_name }}
+    </div>
+    <div class="col-12 col-md-5 text-md-end small">
+      <div id="mixSummary" class="text-muted"></div>
+      <div>{% t "Fertilizer / chemical cost" %}: <strong id="chemTotal">0</strong></div>
+    </div>
+  </div>
+  <div class="form-text">{{ form.rounds.help_text }}. {% t "Packed for later (e.g. manure in 20 kg packets)? Count each batch you made, and enter the packet size above." %}</div>
+  <template id="chemTemplate">{% with f=lines.empty_form %}{% include "estate/_chem_row.html" %}{% endwith %}</template>
+</div>
+
+{# ---------- full-screen mixing preview ---------- #}
+<div class="modal fade mix-modal" id="mixModal" tabindex="-1" aria-labelledby="mixTitle" aria-hidden="true">
+  <div class="modal-dialog modal-fullscreen"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title" id="mixTitle"><i class="bi bi-moisture"></i> {% t "Mixing preview" %}</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{% t 'Close' %}"></button>
+    </div>
+    <div class="modal-body" id="mixBody"></div>
+    <div class="modal-footer"><button type="button" class="btn btn-primary btn-lg w-100" data-bs-dismiss="modal">{% t "Close" %}</button></div>
+  </div></div>
+</div>
+<script id="chem-text" type="application/json">{
+  "stock": "{% filter escapejs %}{% t 'Stock' %}{% endfilter %}",
+  "noPurchase": "{% filter escapejs %}{% t 'no purchase (enter the cost)' %}{% endfilter %}",
+  "short": "{% filter escapejs %}{% t 'Only {left} left in this purchase: pick another purchase for the rest, or enter the purchase first.' %}{% endfilter %}",
+  "shortStock": "{% filter escapejs %}{% t 'Only {left} in stock. You can still save; enter the purchase in Fertilizers / Chemicals.' %}{% endfilter %}",
+  "noMatch": "{% filter escapejs %}{% t 'Nothing found.' %}{% endfilter %}",
+  "added": "{% filter escapejs %}{% t 'added' %}{% endfilter %}",
+  "inactive": "{% filter escapejs %}{% t 'inactive' %}{% endfilter %}",
+  "usual": "{% filter escapejs %}{% t 'usual for this work' %}{% endfilter %}",
+  "noDose": "{% filter escapejs %}{% t 'no dosage set' %}{% endfilter %}",
+  "inJar": "{% filter escapejs %}{% t 'In one jar of {jar} L' %}{% endfilter %}",
+  "inJarNo": "{% filter escapejs %}{% t 'In one jar' %}{% endfilter %}",
+  "inBatch": "{% filter escapejs %}{% t 'In one batch' %}{% endfilter %}",
+  "perPlant": "{% filter escapejs %}{% t 'Per plant' %}{% endfilter %}",
+  "perAcre": "{% filter escapejs %}{% t 'Per acre' %}{% endfilter %}",
+  "xRounds": "{% filter escapejs %}{% t '{qty} × {n} rounds' %}{% endfilter %}",
+  "waterSum": "{% filter escapejs %}{% t 'Each jar {jar} L · {n} rounds = {total} L' %}{% endfilter %}",
+  "drySum": "{% filter escapejs %}{% t 'One batch {batch} · {n} rounds = {total}' %}{% endfilter %}",
+  "plantsSum": "{% filter escapejs %}{% t '{dose} kg per plant: {per} plants per batch ({all} in all)' %}{% endfilter %}",
+  "packetsSum": "{% filter escapejs %}{% t '{n} packets of {size} kg' %}{% endfilter %}",
+  "jarHead": "{% filter escapejs %}{% t 'Jar {jar} L water · mix {n} rounds' %}{% endfilter %}",
+  "dryHead": "{% filter escapejs %}{% t 'Dry mix · {batch} per batch · {n} rounds' %}{% endfilter %}",
+  "intoJar": "{% filter escapejs %}{% t 'Put into each jar' %}{% endfilter %}",
+  "intoBatch": "{% filter escapejs %}{% t 'Put into each batch' %}{% endfilter %}",
+  "nothing": "{% filter escapejs %}{% t 'Add fertilizers / chemicals first.' %}{% endfilter %}",
+  "currency": "{{ CURRENCY|escapejs }}"
+}</script>

@@ -5,7 +5,7 @@
   <div class="card shadow-lg" style="width:100%;max-width:380px">
     <div class="card-body p-4">
       <div class="text-center mb-3">
-        {% if APP.logo_type %}<img src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="" style="max-height:64px;max-width:200px">{% else %}<img src="{% static 'icons/icon-192.png' %}?v={{ ASSET_V }}" alt="" style="height:80px;width:80px">{% endif %}
+        {% if APP.logo_type %}<img src="{% url 'core:logo' %}?v={{ APP.updated_at|date:'U' }}" alt="" style="max-height:64px;max-width:200px">{% else %}<img src="{% static_v 'icons/icon-192.png' %}" alt="" style="height:80px;width:80px">{% endif %}
         <h5 class="mt-2 mb-0">{% t "Plantation Management System" %}</h5>
         <div class="text-muted small">{{ ESTATE_NAME }}</div>
       </div>

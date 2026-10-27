@@ -248,17 +248,29 @@ def recovery_by_product(d1, d2):
 
 
 def input_usage(d1, d2):
+    """Each fertilizer / chemical used in the period: quantity, cost at the purchase prices used, average
+    cost per unit, entries, last used and the stock left now."""
     inputs = {a.pk: a for a in m.AgriInput.objects.select_related("unit")}
     out = []
     for r in (
-        m.FieldOperation.objects.filter(date__range=(d1, d2), agri_input__isnull=False)
+        m.FieldOperationInput.objects.filter(operation__date__range=(d1, d2))
         .order_by()
         .values("agri_input")
-        .annotate(qty=Sum("quantity"), cost=Sum("input_cost"), n=Count("id"), last=Max("date"))
+        .annotate(
+            qty=Sum("quantity"), cost=Sum("cost"), n=Count("operation", distinct=True), last=Max("operation__date")
+        )
         .order_by("-cost")
     ):
         a = inputs.get(r["agri_input"])
-        out.append({**r, "name": a.name if a else "?", "unit": str(a.unit) if a and a.unit_id else ""})
+        out.append(
+            {
+                **r,
+                "name": a.name if a else "?",
+                "unit": a.unit_name if a else "",
+                "avg_cost": r["cost"] / r["qty"] if r["qty"] else D0,
+                "stock": a.stock_qty if a else D0,
+            }
+        )
     return out
 
 

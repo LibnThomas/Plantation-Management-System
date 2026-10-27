@@ -21,7 +21,14 @@ from core.pdf import new_pdf
 
 from . import deletion, payroll, productivity
 from . import models as m
-from .forms import PayrollGenerateForm, build_form_class, build_wage_history_formset, style_fields
+from .forms import (
+    PayrollGenerateForm,
+    build_chemical_formset,
+    build_form_class,
+    build_purchase_formset,
+    build_wage_history_formset,
+    style_fields,
+)
 from .registry import BY_MODEL, LOOKUP_MODULES
 from .registry import get as get_cfg
 from .templatetags.estate_tags import NUMERIC_TYPES, cell_value, inr, num
@@ -380,6 +387,8 @@ def crud_form(request, slug, pk=None):
     instance = get_object_or_404(cfg.model, pk=pk) if pk else None
     if not instance and not cfg.can_add:
         return redirect("estate:list", slug=slug)
+    if instance and cfg.model is m.FieldOperationInput:  # a chemical line is changed on its field-work entry
+        return redirect("estate:update", slug="field-operations", pk=instance.operation_id)
     FormClass = build_form_class(cfg)
     initial = {}
     if not instance:  # pre-fill from the query string, e.g. ?employee=3&date=2026-10-01
@@ -416,7 +425,32 @@ def crud_form(request, slug, pk=None):
         )
 
     popup = request.GET.get("popup") == "1"
-    if request.method == "POST" and form.is_valid() and (history is None or history.is_valid()):
+    # fertilizers / chemicals: their purchases; field work: the chemicals used
+    lines = None
+    if cfg.model is m.AgriInput and not popup:
+        lines = build_purchase_formset()(
+            data,
+            instance=instance or m.AgriInput(),
+            prefix="buy",
+            queryset=m.AgriInputPurchase.objects.order_by("date", "id")
+            if instance
+            else m.AgriInputPurchase.objects.none(),
+        )
+    elif cfg.model is m.FieldOperation and not popup:
+        lines = build_chemical_formset()(
+            data,
+            instance=instance or m.FieldOperation(),
+            prefix="chem",
+            queryset=m.FieldOperationInput.objects.select_related("agri_input__unit").order_by("id")
+            if instance
+            else m.FieldOperationInput.objects.none(),
+        )
+    if (
+        request.method == "POST"
+        and form.is_valid()
+        and (history is None or history.is_valid())
+        and (lines is None or lines.is_valid())
+    ):
         try:
             with transaction.atomic():
                 obj = form.save(commit=False)
@@ -428,6 +462,8 @@ def crud_form(request, slug, pk=None):
                     _save_current_payment(request, form, obj)
                 if receiving:
                     _save_receipt(request, form, obj)
+                if lines is not None:
+                    _save_lines(request, lines, obj)
             if history is not None:
                 history.instance = obj
                 for r in history.save(commit=False):
@@ -439,10 +475,12 @@ def crud_form(request, slug, pk=None):
                 m.close_open_rates(obj.pk)
         except ValidationError as e:  # e.g. paying more than is pending: nothing is saved
             form.add_error("received_now" if receiving else "current_payment", e.messages[0])
-            return _render_form(request, cfg, form, instance, history, FormClass, popup)
+            return _render_form(request, cfg, form, instance, history, FormClass, popup, lines)
         if popup:  # hand the new record to the page that opened the pop-up
             return render(request, "estate/popup_done.html", {"payload": popup_payload(obj)})
         messages.success(request, ui("Saved: {name}", name=model_label(cfg.model)))
+        if cfg.model is m.FieldOperation:
+            _stock_warnings(request, obj)
         if paying and form.cleaned_data.get("current_payment"):
             obj.refresh_from_db()
             text = (
@@ -465,7 +503,49 @@ def crud_form(request, slug, pk=None):
         if "save_add" in request.POST:
             return redirect("estate:create", slug=slug)
         return redirect("estate:list", slug=slug)
-    return _render_form(request, cfg, form, instance, history, FormClass, popup)
+    return _render_form(request, cfg, form, instance, history, FormClass, popup, lines)
+
+
+def _save_lines(request, formset, parent):
+    """Purchases of a chemical, or the chemicals of a field-work entry (each line recalculates its
+    purchase, the chemical's stock and the entry's cost when saved / deleted)."""
+    formset.instance = parent
+    for line in formset.save(commit=False):
+        if not line.pk:
+            line.created_by = request.user
+        line.save()
+    for line in formset.deleted_objects:
+        line.delete()
+    if isinstance(parent, m.FieldOperation):
+        parent.update_costs()
+    else:
+        parent.refresh_stock()
+
+
+def _stock_warnings(request, op):
+    for line in op.chemicals.select_related("agri_input__unit", "purchase"):
+        a = line.agri_input
+        a.refresh_from_db(fields=["stock_qty"])
+        if a.stock_qty < 0:
+            messages.warning(
+                request,
+                ui(
+                    "{name}: more used than bought (stock {qty}). Enter its purchase in Fertilizers / Chemicals.",
+                    name=a.name,
+                    qty=f"{num(a.stock_qty)} {a.unit_name}".strip(),
+                ),
+            )
+        elif line.purchase_id and line.purchase.left_qty < 0:
+            messages.warning(
+                request,
+                ui(
+                    "{name}: more used from the purchase of {date} than it had ({qty} short). "
+                    "Pick another purchase for the rest, or check the quantity.",
+                    name=a.name,
+                    date=f"{line.purchase.date:%d/%m/%y}",
+                    qty=f"{num(-line.purchase.left_qty)} {a.unit_name}".strip(),
+                ),
+            )
 
 
 def _add_payment_field(form, instance):
@@ -580,7 +660,7 @@ def _sale_edit_data(cfg, instance):
     return data
 
 
-def _render_form(request, cfg, form, instance, history, FormClass, popup):
+def _render_form(request, cfg, form, instance, history, FormClass, popup, lines=None):
     computed = []
     if instance and cfg.model not in (m.Harvest, m.SalaryPayment, m.Sale):  # these show live figures instead
         computed = [
@@ -599,17 +679,136 @@ def _render_form(request, cfg, form, instance, history, FormClass, popup):
             "instance": instance,
             "computed": computed,
             "history": history,
+            "lines": lines,
+            "skip_fields": MIX_FIELDS if cfg.model is m.FieldOperation and lines is not None else (),
             "form_data": {
                 **_form_context_data(cfg, FormClass),
                 "add_new": _add_new_targets(request, FormClass, popup),
                 **_harvest_preview_data(cfg, instance),
                 **_multi_employee_data(cfg, instance, popup),
+                **_chemicals_data(cfg, instance, lines),
             },
             "popup": popup,
             **_payroll_edit_data(cfg, instance),
             **_sale_edit_data(cfg, instance),
         },
     )
+
+
+MIX_FIELDS = ("mix_type", "tank_litres", "mix_dose", "packet_size", "rounds", "mix_name")
+
+
+def _chemicals_data(cfg, instance, lines):
+    """Field-work page: every fertilizer / chemical with its dosage, stock and purchases (prices), for the
+    search box, the auto quantities and costs, the stock warnings and the mixing preview."""
+    if cfg.model is not m.FieldOperation or lines is None:
+        return {}
+    own_purchase, own_input = {}, {}  # what this entry already uses: available again while editing it
+    if instance:
+        for x in instance.chemicals.all():
+            own_purchase[x.purchase_id] = own_purchase.get(x.purchase_id, 0) + x.quantity
+            own_input[x.agri_input_id] = own_input.get(x.agri_input_id, 0) + x.quantity
+    purchases = {}
+    for p in m.AgriInputPurchase.objects.select_related("agri_input__unit").order_by("-date", "-id"):
+        purchases.setdefault(p.agri_input_id, []).append(
+            {
+                "id": p.pk,
+                "label": p.option_label(),
+                "date": p.date.isoformat(),
+                "cost": float(p.unit_cost),
+                "left": float(p.left_qty + own_purchase.get(p.pk, 0)),
+            }
+        )
+    chems = []
+    for a in m.AgriInput.objects.select_related("unit", "input_type").order_by("name"):
+        chems.append(
+            {
+                "id": a.pk,
+                "name": a.name,
+                "unit": a.unit_name,
+                "type": a.input_type_id,
+                "type_name": str(a.input_type) if a.input_type_id else "",
+                "active": a.is_active,
+                "dose": float(a.dose_qty),
+                "basis": a.dose_basis,
+                "water": float(a.dose_water),
+                "dosage": a.dosage_text(),
+                "pack": float(a.pack_size),
+                "cost": float(a.unit_cost),
+                "stock": float(a.stock_qty + own_input.get(a.pk, 0)),
+                "purchases": purchases.get(a.pk, []),
+            }
+        )
+    op_types = dict(m.OperationType.objects.exclude(input_type=None).values_list("pk", "input_type"))
+    # a new entry starts with the jar size used last time (or 500 L)
+    last_jar = (
+        m.FieldOperation.objects.filter(tank_litres__gt=0)
+        .order_by("-date", "-id")
+        .values_list("tank_litres", flat=True)
+        .first()
+    )
+    return {
+        "chem": {
+            "items": chems,
+            "op_types": op_types,
+            "saved": _saved_mixes(),
+            "default_jar": float(last_jar or 500),
+        },
+        "labour_cost": float(instance.labour_cost) if instance else 0,
+    }
+
+
+def _saved_mixes(limit=60):
+    """Mixes used before (newest first, each different mix once), to fill a new entry with the same
+    chemicals and amounts. A mix with a name shows its name first."""
+    out, seen = [], set()
+    ops = (
+        m.FieldOperation.objects.filter(chemicals__isnull=False)
+        .distinct()
+        .select_related("operation_type")
+        .prefetch_related("chemicals__agri_input__unit")
+        .order_by("-date", "-id")[:400]
+    )
+    for op in ops:
+        lines = sorted(op.chemicals.all(), key=lambda x: x.pk)
+        key = (
+            op.mix_type,
+            float(op.tank_litres),
+            tuple(sorted((x.agri_input_id, float(x.dose_qty), x.dose_basis) for x in lines)),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        parts = " + ".join(f"{x.agri_input.name} {num(x.dose_qty)} {x.agri_input.unit_name}".strip() for x in lines)
+        where = f" / {num(op.tank_litres)} L" if op.mix_type == "water" and op.tank_litres else ""
+        if op.mix_type == "dry":
+            where = f" ({ui('dry mix')})"
+        label = f"{op.date:%d/%m/%y} · " + (f"{op.mix_name} · " if op.mix_name else "") + parts + where
+        out.append(
+            {
+                "id": op.pk,
+                "label": label,
+                "name": op.mix_name,
+                "mix_type": op.mix_type,
+                "tank": float(op.tank_litres),
+                "mix_dose": float(op.mix_dose),
+                "packet": float(op.packet_size),
+                "rounds": float(op.rounds),
+                "lines": [
+                    {
+                        "chem": x.agri_input_id,
+                        "dose": float(x.dose_qty),
+                        "basis": x.dose_basis,
+                        "water": float(x.dose_water),
+                    }
+                    for x in lines
+                ],
+            }
+        )
+        if len(out) >= limit:
+            break
+    # named mixes first, each group newest first
+    return sorted(out, key=lambda x: not x["name"])
 
 
 def _payroll_edit_data(cfg, instance):

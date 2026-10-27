@@ -1,4 +1,4 @@
-{% extends "base.html" %}{% load estate_tags core_tags %}
+{% extends "base.html" %}{% load estate_tags core_tags static %}
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -17,7 +17,7 @@
   </div>
 </div>
 <div class="row">
-  <div class="{% if history %}col-12{% else %}col-xl-9{% endif %}">
+  <div class="{% if history or cfg.slug == 'agri-inputs' and lines %}col-12{% else %}col-xl-9{% endif %}">
     <div class="card">
       <div class="card-body">
         <form method="post" novalidate id="mainForm"{% if popup %} action="?popup=1"{% endif %}>
@@ -25,7 +25,8 @@
           {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
           <div class="row g-3">
           {% for field in form %}
-            {% if field.field.widget.allow_multiple_selected %}
+            {% if field.name in skip_fields %}{# shown in its own section below #}
+            {% elif field.field.widget.allow_multiple_selected %}
               <div class="col-12">
                 <div class="form-label small fw-semibold mb-1">{{ field.label }}{% if field.field.required %} <span class="text-danger">*</span>{% endif %}</div>
                 <div class="chip-pick">{% for c in field %}{{ c.tag }}<label class="btn btn-sm btn-outline-primary" for="{{ c.id_for_label }}"><i class="bi bi-check2"></i> {{ c.choice_label }}</label>{% empty %}<span class="text-muted small">–</span>{% endfor %}</div>
@@ -46,6 +47,8 @@
             {% endif %}
           {% endfor %}
           </div>
+          {% if lines and cfg.slug == 'field-operations' %}{% include "estate/_field_chemicals.html" %}{% endif %}
+          {% if lines and cfg.slug == 'agri-inputs' %}{% include "estate/_purchases.html" %}{% endif %}
           {% if history %}
           <div class="mt-4" id="wageHistory">
             <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-2">
@@ -135,7 +138,7 @@
       </div>
     </div>
   </div>
-  <div class="col-xl-3 mt-3 mt-xl-0{% if history %} d-none{% endif %}">
+  <div class="col-xl-3 mt-3 mt-xl-0{% if history or cfg.slug == 'agri-inputs' and lines %} d-none{% endif %}">
     {% if computed %}
     <div class="card mb-3"><div class="card-header"><i class="bi bi-calculator"></i> {% t "Calculated values" %}</div>
       <ul class="list-group list-group-flush small">
@@ -206,7 +209,7 @@
         <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Input quantity x cost per kg" %}</span><strong class="text-nowrap" data-calc="perkg">0</strong></li>
         {% else %}
         <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Fertilizer / chemical cost" %}</span><strong class="text-nowrap" data-calc="input">0</strong></li>
-        <li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Labour cost" %}</span><strong class="text-nowrap" data-calc="labour">0</strong></li>
+        {% if instance.labour_cost %}<li class="list-group-item d-flex justify-content-between"><span class="text-muted">{% t "Labour cost" %}</span><strong class="text-nowrap" data-calc="labour">0</strong></li>{% endif %}
         {% endif %}
         <li class="list-group-item d-flex justify-content-between"><span>{% t "Total cost" %}</span><strong class="text-nowrap" data-calc="total">0</strong></li>
       </ul>
@@ -230,6 +233,8 @@
 <script id="form-text" type="application/json">{"addNew": "{% filter escapejs %}{% t '+ Add new…' %}{% endfilter %}", "history": "{% filter escapejs %}{% t 'From wage history: {from} to {to}' %}{% endfilter %}", "now": "{% filter escapejs %}{% t 'now' %}{% endfilter %}", "nohist": "{% filter escapejs %}{% t 'Job type default (no wage period covers this date)' %}{% endfilter %}", "fromList": "{% filter escapejs %}{% t '{cost} per {unit} from the list' %}{% endfilter %}", "currency": "{{ CURRENCY|escapejs }}", "hpNone": "{% filter escapejs %}{% t 'Nobody did this job on this date: add the Daily Labour Count or Work Details for it.' %}{% endfilter %}", "hpPick": "{% filter escapejs %}{% t 'Choose the date, product and job, and enter the quantity.' %}{% endfilter %}", "hpNoJob": "{% filter escapejs %}{% t 'This product has no picking job: choose the job.' %}{% endfilter %}", "hpOt": "{% filter escapejs %}{% t '{n} people did OT' %}{% endfilter %}", "hpOthers": "{% filter escapejs %}{% t 'includes {qty} from other harvests of this day' %}{% endfilter %}", "hpAvgOt": "{% filter escapejs %}{% t 'average {h} OT hours' %}{% endfilter %}", "meSearch": "{% filter escapejs %}{% t 'Search employees…' %}{% endfilter %}", "meCount": "{% filter escapejs %}{% t '{n} selected' %}{% endfilter %}", "meAll": "{% filter escapejs %}{% t 'Select shown' %}{% endfilter %}", "meNone": "{% filter escapejs %}{% t 'Clear' %}{% endfilter %}", "meMany": "{% filter escapejs %}{% t '{n} employees selected: one entry is saved for each, with their own work type, wage and OT rate for the date. Only the date and block can be changed; to change a wage, select just one employee.' %}{% endfilter %}", "meLabel": "{% filter escapejs %}{% t 'Employees (select one or more)' %}{% endfilter %}"}</script>
 {% endblock %}
 {% block scripts %}
+{% if lines and cfg.slug == 'field-operations' %}<script src="{% static_v 'js/chemicals.js' %}"></script>{% endif %}
+{% if lines and cfg.slug == 'agri-inputs' %}<script src="{% static_v 'js/purchases.js' %}"></script>{% endif %}
 <script>
 (function () {
   const data = JSON.parse(document.getElementById("form-data").textContent);
@@ -645,7 +650,7 @@
       const qty = v("input_quantity"), rate = v("processing_cost");
       out("perkg", fmt.format(qty) + " x " + fmt.format(rate)); out("total", money(qty * rate));
     } else if (document.querySelector('[data-calc="input"]')) {
-      const input = v("quantity") * v("unit_cost"), labour = v("workers_count") * v("wage_per_worker");
+      const input = window.PMSChem ? window.PMSChem.total() : 0, labour = data.labour_cost || 0;  // older entries only
       out("input", money(input)); out("labour", money(labour)); out("total", money(input + labour));
     }
   }

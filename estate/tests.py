@@ -3,7 +3,7 @@ from decimal import Decimal as D
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
 from core.dbrouter import DEFAULT_DB, DEMO_DB, use_db
 from core.models import Label
@@ -162,19 +162,64 @@ class CalculationTests(Base):
         self.assertEqual(dates.parse("15/06/65"), dt.date(1965, 6, 15))  # a birth date, not 2065
         self.assertIsNone(dates.parse("31/02/26"))
 
-    def test_field_operation_cost_from_input_list(self):
-        inp = m.AgriInput.objects.create(name="Test NPK", unit=lookup(m.Unit), unit_cost=D(95))
-        f = m.FieldOperation.objects.create(operation_type=lookup(m.OperationType), agri_input=inp, quantity=D(10))
-        self.assertEqual((f.unit_cost, f.input_cost, f.total_cost), (D(95), D(950), D(950)))
-        f2 = m.FieldOperation.objects.create(
-            operation_type=lookup(m.OperationType),
-            agri_input=inp,
-            quantity=D(10),
-            unit_cost=D(90),
-            workers_count=2,
-            wage_per_worker=D(500),
+    def test_chemical_purchases_keep_their_price(self):
+        kg = lookup(m.Unit)
+        npk = m.AgriInput.objects.create(
+            name="Test NPK", unit=kg, pack_size=D(25), dose_qty=D("2.5"), dose_basis="water", dose_water=D(500)
         )
-        self.assertEqual((f2.input_cost, f2.labour_cost, f2.total_cost), (D(900), D(1000), D(1900)))
+        jan = m.AgriInputPurchase.objects.create(
+            agri_input=npk, date=dt.date(2026, 1, 5), bags=D(10), price_per_bag=D(250), supplier="A"
+        )
+        m.AgriInputPurchase.objects.create(agri_input=npk, date=dt.date(2026, 3, 5), bags=D(10), price_per_bag=D(450))
+        self.assertEqual(
+            (jan.pack_size, jan.quantity, jan.total_amount, jan.unit_cost), (D(25), D(250), D(2500), D(10))
+        )
+        npk.refresh_from_db()
+        self.assertEqual((npk.purchased_qty, npk.stock_qty, npk.unit_cost), (D(500), D(500), D(18)))  # latest price
+        # 2.5 kg per 500 L jar, mixed 4 times -> 10 kg
+        op = m.FieldOperation.objects.create(
+            date=dt.date(2026, 2, 1),
+            operation_type=lookup(m.OperationType),
+            tank_litres=D(500),
+            rounds=D(4),
+        )
+        line = m.FieldOperationInput.objects.create(
+            operation=op, agri_input=npk, purchase=jan, dose_qty=D("2.5"), dose_basis="water", dose_water=D(500)
+        )
+        self.assertEqual((line.quantity, line.unit_cost, line.cost), (D(10), D(10), D(100)))
+        op.refresh_from_db()
+        self.assertEqual((op.input_cost, op.total_cost), (D(100), D(100)))
+        # the same ratio in a 1000 L jar: 5 kg per mix, x 4 mixes = 20 kg
+        op.tank_litres = D(1000)
+        self.assertEqual(op.chemical_qty(D("2.5"), "water", D(500)), D(20))
+        self.assertEqual(op.chemical_qty(D(5), "water", D(1000)), D(20))
+        op.tank_litres = D(500)
+        self.assertIn("Test NPK 10", op.chemicals_text)
+        jan.refresh_from_db()
+        npk.refresh_from_db()
+        self.assertEqual((jan.used_qty, jan.left_qty, npk.used_qty, npk.stock_qty), (D(10), D(240), D(10), D(490)))
+        # a cheaper purchase later never changes the old entry
+        m.AgriInputPurchase.objects.create(agri_input=npk, date=dt.date(2026, 6, 5), bags=D(4), price_per_bag=D(100))
+        line.refresh_from_db()
+        op.refresh_from_db()
+        npk.refresh_from_db()
+        self.assertEqual((line.unit_cost, op.input_cost, npk.unit_cost), (D(10), D(100), D(4)))
+        # dry mix: 50 kg of cake in one batch, 4 batches made -> 200 kg
+        cake = m.AgriInput.objects.create(name="Test cake", unit=kg, pack_size=D(50))
+        line2 = m.FieldOperationInput.objects.create(
+            operation=op, agri_input=cake, dose_qty=D(50), dose_basis="batch", unit_cost=D(2)
+        )
+        self.assertEqual((line2.quantity, line2.cost), (D(200), D(400)))
+        cake.refresh_from_db()
+        self.assertEqual(cake.stock_qty, D(-200))  # used without a purchase: shown as short, still saved
+        # removing a line / the whole entry gives the stock back
+        line2.delete()
+        op.refresh_from_db()
+        self.assertEqual(op.input_cost, D(100))
+        op.delete()
+        npk.refresh_from_db()
+        jan.refresh_from_db()
+        self.assertEqual((npk.stock_qty, jan.left_qty), (D(600), D(250)))
 
     def test_manual_salary(self):
         p = m.SalaryPayment.objects.create(
@@ -453,6 +498,91 @@ class PageTests(TestCase):
             urls += [f"/m/{cfg.slug}/"] + ([f"/m/{cfg.slug}/add/"] if cfg.can_add else [])
         for url in urls:
             self.assertEqual(self.client.get(url).status_code, 200, url)
+
+    def test_chemical_page_purchases_and_field_work_chemicals(self):
+        kg = lookup(m.Unit)
+        r = self.client.post(
+            "/m/agri-inputs/add/",
+            {
+                "name": "Form NPK",
+                "unit": kg.pk,
+                "pack_size": "25",
+                "dose_qty": "2.5",
+                "dose_basis": "water",
+                "dose_water": "500",
+                "is_active": "on",
+                "buy-TOTAL_FORMS": "2",
+                "buy-INITIAL_FORMS": "0",
+                "buy-0-date": "05/01/26",
+                "buy-0-bags": "10",
+                "buy-0-pack_size": "",
+                "buy-0-price_per_bag": "250",
+                "buy-0-supplier": "Agro",
+                "buy-1-date": "05/03/26",
+                "buy-1-bags": "2",
+                "buy-1-pack_size": "25",
+                "buy-1-price_per_bag": "450",
+            },
+        )
+        self.assertEqual(r.status_code, 302, r.content.decode()[:3000])
+        npk = m.AgriInput.objects.get(name="Form NPK")
+        self.assertEqual((npk.purchased_qty, npk.stock_qty, npk.unit_cost), (D(300), D(300), D(18)))
+        jan = npk.purchases.get(date=dt.date(2026, 1, 5))
+        self.assertEqual((jan.pack_size, jan.unit_cost), (D(25), D(10)))
+        page = self.client.get(f"/m/agri-inputs/{npk.pk}/edit/").content.decode()
+        self.assertIn('id="buyRows"', page)
+
+        op_type = lookup(m.OperationType)
+        data = {
+            "date": "01/02/26",
+            "operation_type": op_type.pk,
+            "mix_type": "water",
+            "tank_litres": "500",
+            "rounds": "4",
+            "mix_name": "NPK spray",
+            "area_covered_acres": "0",
+            "chem-TOTAL_FORMS": "1",
+            "chem-INITIAL_FORMS": "0",
+            "chem-0-agri_input": npk.pk,
+            "chem-0-purchase": jan.pk,
+            "chem-0-dose_qty": "2.5",
+            "chem-0-dose_basis": "water",
+            "chem-0-dose_water": "500",
+            "chem-0-quantity": "",
+            "chem-0-unit_cost": "",
+        }
+        page = self.client.get("/m/field-operations/add/").content.decode()
+        self.assertIn('id="chemSearch"', page)
+        self.assertIn("Form NPK", page)
+        r = self.client.post("/m/field-operations/add/", data)
+        self.assertEqual(r.status_code, 302, r.content.decode()[:3000])
+        op = m.FieldOperation.objects.latest("id")
+        self.assertEqual((op.rounds, op.input_cost), (D(4), D(100)))  # 2.5 kg x 4 mixes at the January price
+        line = op.chemicals.get()
+        self.assertEqual((line.quantity, line.unit_cost), (D(10), D(10)))
+        # the mix can be picked again on a new entry
+        self.assertIn("NPK spray", self.client.get("/m/field-operations/add/").content.decode())
+        # editing: the line's quantity changes, its price stays; a purchase of another chemical is refused
+        edit = {
+            **data,
+            "chem-INITIAL_FORMS": "1",
+            "chem-0-id": line.pk,
+            "chem-0-operation": op.pk,
+            "chem-0-quantity": "12",
+            "chem-0-unit_cost": "10",
+        }
+        self.assertEqual(self.client.post(f"/m/field-operations/{op.pk}/edit/", edit).status_code, 302)
+        op.refresh_from_db()
+        self.assertEqual(op.input_cost, D(120))
+        other = m.AgriInput.objects.create(name="Other", unit=kg)
+        bad = m.AgriInputPurchase.objects.create(agri_input=other, bags=D(1), price_per_bag=D(5))
+        r = self.client.post(f"/m/field-operations/{op.pk}/edit/", {**edit, "chem-0-purchase": bad.pk})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, "This purchase is of another fertilizer / chemical.")
+        # the line's edit link goes to its field-work entry; the list of chemicals used opens
+        r = self.client.get(f"/m/chemical-use/{line.pk}/edit/")
+        self.assertRedirects(r, f"/m/field-operations/{op.pk}/edit/", fetch_redirect_response=False)
+        self.assertContains(self.client.get("/m/chemical-use/"), "Form NPK")
 
     def test_exports(self):
         m.Employee.objects.create(
@@ -1129,3 +1259,33 @@ class DemoIsolationTests(TestCase):
         session.save()
         html = self.client.get("/").content.decode()
         self.assertIn("All salaries are paid.", html)
+
+
+class ChemicalMigrationTests(TransactionTestCase):
+    serialized_rollback = True  # the lists seeded by the migrations are back for the other tests
+
+    def test_old_single_chemical_entries_are_moved_to_lines(self):
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([("estate", "0022_chemical_purchases_and_lines")])
+        old = executor.loader.project_state([("estate", "0022_chemical_purchases_and_lines")]).apps
+        A, F, T = (old.get_model("estate", n) for n in ("AgriInput", "FieldOperation", "OperationType"))
+        a = A.objects.create(name="Old fungicide", unit_cost=D(120))
+        op = F.objects.create(
+            date=dt.date(2026, 2, 1),
+            operation_type=T.objects.first(),
+            agri_input=a,
+            quantity=D(3),
+            unit_cost=D(110),
+            input_cost=D(330),
+            total_cost=D(330),
+        )
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        line = m.FieldOperationInput.objects.get(operation_id=op.pk)
+        self.assertEqual((line.quantity, line.unit_cost, line.cost), (D(3), D(110), D(330)))
+        self.assertEqual(line.purchase.supplier, "Opening stock")
+        self.assertEqual(m.AgriInput.objects.get(pk=a.pk).stock_qty, D(0))

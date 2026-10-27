@@ -273,7 +273,49 @@ class Generator:
                     )
             d += dt.timedelta(days=1)
 
+    # demo dosages / pack sizes: name -> (pack size, dose, basis, litres of water)
+    DOSES = {
+        "NPK 18:18:18": (25, 2.5, "water", 500),
+        "Urea": (45, 0.1, "plant", 0),
+        "Muriate of Potash (MOP)": (50, 0.1, "plant", 0),
+        "Rock Phosphate": (50, 0.15, "plant", 0),
+        "Dolomite": (50, 0.5, "plant", 0),
+        "Neem Cake": (50, 0.5, "plant", 0),
+        "Cow dung compost": (50, 2, "plant", 0),
+        "Spinosad 45 SC": (100, 150, "water", 500),
+        "Copper Oxychloride 50 WP": (1, 1, "water", 500),
+        "Bordeaux mixture": (25, 5, "water", 500),
+        "Trichoderma": (1, 0.05, "plant", 0),
+        "Micronutrient mix": (5, 1.5, "water", 500),
+    }
+    SUPPLIERS = ["Agro Traders, Kumily", "Spices Board depot", "Green Farm Supplies", "Co-operative society"]
+
+    def _chemicals(self):
+        """Dosage, pack size and three purchases at different prices (prices change over the year)."""
+        for a in m.AgriInput.objects.filter(is_active=True):
+            pack, dose, basis, water = self.DOSES.get(a.name, (1, 1, "water", 500))
+            a.pack_size, a.dose_qty, a.dose_basis, a.dose_water = D(str(pack)), D(str(dose)), basis, D(str(water))
+            a.save()
+            base = a.unit_cost or D(10)
+            for k, day in enumerate(
+                [self.start, self.start + dt.timedelta(days=150), self.start + dt.timedelta(days=300)]
+            ):
+                if day > self.today:
+                    break
+                factor = D(str([1, 1.35, 0.9][k]))
+                m.AgriInputPurchase.objects.create(
+                    agri_input=a,
+                    date=day,
+                    bags=D(random.randint(8, 20)),
+                    pack_size=a.pack_size,
+                    price_per_bag=(base * a.pack_size * factor).quantize(D("1")),
+                    supplier=random.choice(self.SUPPLIERS),
+                    invoice_no=f"B{random.randint(1000, 9999)}",
+                    created_by_id=self.user_id,
+                )
+
     def _field_work(self):
+        self._chemicals()
         ops = list(m.OperationType.objects.filter(is_active=True).select_related("input_type"))
         with_input = [
             o for o in ops if o.input_type_id and m.AgriInput.objects.filter(input_type=o.input_type_id).exists()
@@ -289,20 +331,50 @@ class Generator:
                     day = month + dt.timedelta(days=random.randint(2, 25))
                     if day > self.today:
                         continue
-                    agri = _pick(m.AgriInput.objects.filter(input_type=op.input_type_id)) if op.input_type_id else None
-                    m.FieldOperation.objects.create(
+                    agris = list(m.AgriInput.objects.filter(input_type=op.input_type_id)) if op.input_type_id else []
+                    agris = random.sample(agris, k=min(len(agris), random.choice([1, 1, 2]))) if agris else []
+                    # sprays: chemicals in a jar of water; manuring: a dry mix of whole bags, given per plant
+                    sprays = [a for a in agris if a.dose_basis == "water"]
+                    dry = not sprays and bool(agris)
+                    agris = agris if dry else sprays
+                    entry = m.FieldOperation.objects.create(
                         date=day,
                         operation_type=op,
                         block=block,
-                        agri_input=agri,
-                        quantity=(block.area_acres * _r(5, 40)).quantize(D("0.1")) if agri else 0,
                         method=random.choice(methods) if methods else None,
-                        workers_count=random.randint(2, 6),
+                        mix_type="dry" if dry else "water",
+                        tank_litres=D(random.choice([500, 500, 1000])) if sprays else 0,
+                        mix_dose=D(2) if dry else 0,
+                        packet_size=D(20) if dry else 0,
+                        rounds=D(random.randint(1, 2) if dry else random.randint(2, 6)) if agris else 0,
+                        mix_name="Monthly manure mix" if dry and random.random() < 0.3 else "",
                         area_covered_acres=block.area_acres,
                         purpose=op.name,
-                        next_due_date=day + dt.timedelta(days=random.choice([45, 60, 90])) if agri else None,
+                        next_due_date=day + dt.timedelta(days=random.choice([45, 60, 90])) if agris else None,
                         created_by_id=self.user_id,
                     )
+                    for a in agris:
+                        bought = a.purchases.filter(date__lte=day).order_by("-date").first()
+                        m.FieldOperationInput.objects.create(
+                            operation=entry,
+                            agri_input=a,
+                            purchase=bought,
+                            # one bag of each in a dry batch; in water: the amount for this jar (same ratio)
+                            dose_qty=(a.pack_size or a.dose_qty)
+                            if dry
+                            else a.dose_qty * entry.tank_litres / a.dose_water
+                            if a.dose_water
+                            else a.dose_qty,
+                            dose_basis="batch" if dry else "water",
+                            dose_water=0 if dry else entry.tank_litres,
+                            created_by_id=self.user_id,
+                        )
+        # buy enough: each purchase covers what was used from it, with a few bags to spare
+        for p in m.AgriInputPurchase.objects.select_related("agri_input"):
+            pack = p.pack_size or D(1)
+            need = int((p.used_qty / pack).to_integral_value(rounding="ROUND_CEILING"))
+            p.bags = D(need + random.randint(2, 6))
+            p.save()
 
     def _finance(self):
         categories = list(m.ExpenseCategory.objects.filter(is_active=True))

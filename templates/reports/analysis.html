@@ -103,9 +103,9 @@
 <div class="row g-3 mb-3" id="inputs">
   <div class="col-lg-6"><div class="card h-100"><div class="card-header">{% t "Fertilizer / chemical usage" %}</div>
     <div class="table-responsive"><table class="table table-sm table-data mb-0">
-      <thead><tr><th>{% t "Fertilizer / chemical" %}</th><th class="num">{% t "Applications" %}</th><th class="num">{% t "Quantity" %}</th><th class="num">{% t "Cost" %}</th><th>{% t "Last used" %}</th></tr></thead>
-      <tbody>{% for i in inputs %}<tr><td>{{ i.name }}</td><td class="num">{{ i.n }}</td><td class="num">{{ i.qty|num }} {{ i.unit }}</td><td class="num">{{ i.cost|inr:0 }}</td><td>{{ i.last|date:"d/m/y" }}</td></tr>
-      {% empty %}<tr><td colspan="5" class="text-center text-muted">{% t "Nothing used in this period" %}</td></tr>{% endfor %}</tbody>
+      <thead><tr><th>{% t "Fertilizer / chemical" %}</th><th class="num">{% t "Applications" %}</th><th class="num">{% t "Quantity" %}</th><th class="num">{% t "Cost" %}</th><th class="num">{% t "Average cost per unit" %}</th><th class="num">{% t "Stock left" %}</th><th>{% t "Last used" %}</th></tr></thead>
+      <tbody>{% for i in inputs %}<tr><td>{{ i.name }}</td><td class="num">{{ i.n }}</td><td class="num">{{ i.qty|num }} {{ i.unit }}</td><td class="num">{{ i.cost|inr:0 }}</td><td class="num">{{ i.avg_cost|inr }}</td><td class="num{% if i.stock < 0 %} text-danger{% endif %}">{{ i.stock|num }} {{ i.unit }}</td><td>{{ i.last|date:"d/m/y" }}</td></tr>
+      {% empty %}<tr><td colspan="7" class="text-center text-muted">{% t "Nothing used in this period" %}</td></tr>{% endfor %}</tbody>
     </table></div></div></div>
   <div class="col-lg-6"><div class="card h-100"><div class="card-header">{% t "Last done per block: when did we last spray / manure?" %}</div>
     <div class="table-responsive"><table class="table table-sm table-data mb-0">
@@ -142,7 +142,7 @@
 {% endblock %}
 {% block scripts %}
 <script src="{% static 'vendor/chartjs/chart.umd.min.js' %}"></script>
-<script src="{% static 'js/charts.js' %}?v={{ ASSET_V }}"></script>
+<script src="{% static_v 'js/charts.js' %}"></script>
 <script>
 const C = JSON.parse(document.getElementById("chart-data").textContent);
 const $ = (id) => document.getElementById(id);

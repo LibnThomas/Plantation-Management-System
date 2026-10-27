@@ -482,8 +482,18 @@ PRESETS = [
     ),
     (
         "Fertilizer / chemical used per block",
-        "field-operations",
-        "group=agri_input__name&group=block__name&aggs=sum:quantity&pivot=1",
+        "chemical-use",
+        "group=agri_input__name&group=operation__block__name&aggs=sum:quantity&pivot=1",
+    ),
+    (
+        "Fertilizer / chemical cost per month (at the purchase prices used)",
+        "chemical-use",
+        "group=operation__date&group=agri_input__name&period=month&aggs=sum:cost&pivot=1",
+    ),
+    (
+        "Fertilizer / chemical purchases per supplier",
+        "chemical-purchases",
+        "group=supplier&group=agri_input__name&aggs=sum:quantity&aggs=sum:total_amount",
     ),
     (
         "Field-work cost by operation per quarter",
@@ -493,7 +503,7 @@ PRESETS = [
     (
         "Spray & fertilizer history (list)",
         "field-operations",
-        "cols=date&cols=operation_type__name&cols=block__name&cols=agri_input__name&cols=quantity&cols=dosage"
+        "cols=date&cols=operation_type__name&cols=block__name&cols=chemicals_text&cols=rounds&cols=input_cost"
         "&cols=purpose&cols=next_due_date&sort=-date",
     ),
     (

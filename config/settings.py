@@ -165,7 +165,7 @@ SUBSCRIPTION_MANUAL_ALLOWED = env_bool("SUBSCRIPTION_MANUAL_ALLOWED", True)
 SUBSCRIPTION_API_URL = env("SUBSCRIPTION_API_URL", "")  # used when App Settings has no URL (or when locked)
 SUBSCRIPTION_API_TOKEN = env("SUBSCRIPTION_API_TOKEN", "")
 SUBSCRIPTION_API_TIMEOUT = 8  # seconds
-PWA_VERSION = "28"  # raise to make installed apps fetch new styles / scripts
+PWA_VERSION = "31"  # raise to make installed apps fetch new styles / scripts
 # "Add new" pop-ups show the app's own forms in a frame; other sites still can't frame the app
 X_FRAME_OPTIONS = "SAMEORIGIN"
 SUBSCRIPTION_API_SYNC = False  # True: check in the request itself instead of a background thread (tests)

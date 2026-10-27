@@ -1,0 +1,38 @@
+{% load core_tags %}<div class="chem-row" data-chem-row>
+  <div class="chem-row-head">
+    <div class="flex-grow-1 min-w-0">
+      <div class="fw-semibold text-truncate" data-c="name">{{ f.instance.agri_input.name|default:"" }}</div>
+      <div class="small text-muted" data-c="info"></div>
+    </div>
+    <span class="d-none">{% for hf in f.hidden_fields %}{{ hf }}{% endfor %}{{ f.DELETE }}</span>
+    <button type="button" class="btn btn-sm btn-outline-danger" data-c="remove" title="{% t 'Remove' %}" aria-label="{% t 'Remove' %}"><i class="bi bi-x-lg"></i></button>
+  </div>
+  <div class="row g-2">
+    <div class="col-12 col-md-5">
+      <label class="form-label small fw-semibold mb-1" data-c="doselabel">{% t "In one jar" %}</label>
+      <div class="input-group">{{ f.dose_qty }}<span class="input-group-text" data-c="unit"></span></div>
+      {% for e in f.dose_qty.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+    </div>
+    <div class="col-12 col-md-7">
+      <label class="form-label small mb-1">{{ f.purchase.label }}</label>
+      {{ f.purchase }}
+      {% for e in f.purchase.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+    </div>
+    <div class="col-4">
+      <label class="form-label small mb-1">{% t "Quantity used" %} <span class="text-muted" data-c="qunit"></span></label>
+      {{ f.quantity }}
+      <div class="form-text mt-0" data-c="calc"></div>
+      {% for e in f.quantity.errors %}<div class="invalid-feedback d-block">{{ e }}</div>{% endfor %}
+    </div>
+    <div class="col-4">
+      <label class="form-label small mb-1">{% t "Cost per unit" %}</label>
+      {{ f.unit_cost }}
+    </div>
+    <div class="col-4">
+      <label class="form-label small mb-1">{% t "Cost" %}</label>
+      <div class="form-control form-control-sm bg-light fw-semibold text-end" data-c="cost">0</div>
+    </div>
+  </div>
+  <div class="small text-danger mt-1" data-c="warn" hidden></div>
+  {% if f.non_field_errors %}<div class="small text-danger mt-1">{{ f.non_field_errors|join:" " }}</div>{% endif %}
+</div>
